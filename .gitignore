@@ -102,3 +102,13 @@ venv.bak/
 
 trained_models/
 .fuse_hidden*
+
+# cache
+__pycache__
+.DS_Store
+
+*/externals/*
+*/Precomputed_Results/
+*.pkl
+*.gif
+.gitignore
