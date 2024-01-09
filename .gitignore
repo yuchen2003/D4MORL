@@ -111,4 +111,4 @@ __pycache__
 */Precomputed_Results/
 *.pkl
 *.gif
-.gitignore
+logs/

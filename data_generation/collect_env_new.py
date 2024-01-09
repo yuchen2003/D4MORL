@@ -340,7 +340,7 @@ if __name__ == "__main__":
                               obj_num=n_obj)
         actor_critic.eval()
         actor_critic.load_state_dict(torch.load(policy_path))
-        actor_critic.to("cuda").double()
+        actor_critic.to("cpu").double()
         
         ob_rms_path = f"{folder}/EP_env_params_{task}.pkl"
         with open(ob_rms_path, 'rb') as f:
