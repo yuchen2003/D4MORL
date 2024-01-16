@@ -45,10 +45,12 @@ do
             CUDA_VISIBLE_DEVICES=1 python experiment.py --dir $DIR --env $ENV --data_mode _formal --concat_state_pref $CSP --concat_rtg_pref $CRP --concat_act_pref $CAP --mo_rtg True --seed 1 --dataset expert_uniform --model_type $MODEL --num_steps_per_iter $STEP --max_iters $ITER &
             CUDA_VISIBLE_DEVICES=1 python experiment.py --dir $DIR --env $ENV --data_mode _formal --concat_state_pref $CSP --concat_rtg_pref $CRP --concat_act_pref $CAP --mo_rtg True --seed 2 --dataset expert_uniform --model_type $MODEL --num_steps_per_iter $STEP --max_iters $ITER &
             CUDA_VISIBLE_DEVICES=1 python experiment.py --dir $DIR --env $ENV --data_mode _formal --concat_state_pref $CSP --concat_rtg_pref $CRP --concat_act_pref $CAP --mo_rtg True --seed 3 --dataset expert_uniform --model_type $MODEL --num_steps_per_iter $STEP --max_iters $ITER &
-            CUDA_VISIBLE_DEVICES=2 python experiment.py --dir $DIR --env $ENV --data_mode _formal --concat_state_pref $CSP --concat_rtg_pref $CRP --concat_act_pref $CAP --mo_rtg True --seed 4 --dataset amateur_uniform --model_type $MODEL --num_steps_per_iter $STEP --max_iters $ITER &
-            CUDA_VISIBLE_DEVICES=2 python experiment.py --dir $DIR --env $ENV --data_mode _formal --concat_state_pref $CSP --concat_rtg_pref $CRP --concat_act_pref $CAP --mo_rtg True --seed 5 --dataset amateur_uniform --model_type $MODEL --num_steps_per_iter $STEP --max_iters $ITER &
-            CUDA_VISIBLE_DEVICES=2 python experiment.py --dir $DIR --env $ENV --data_mode _formal --concat_state_pref $CSP --concat_rtg_pref $CRP --concat_act_pref $CAP --mo_rtg True --seed 6 --dataset amateur_uniform --model_type $MODEL --num_steps_per_iter $STEP --max_iters $ITER &
+            CUDA_VISIBLE_DEVICES=0 python experiment.py --dir $DIR --env $ENV --data_mode _formal --concat_state_pref $CSP --concat_rtg_pref $CRP --concat_act_pref $CAP --mo_rtg True --seed 4 --dataset amateur_uniform --model_type $MODEL --num_steps_per_iter $STEP --max_iters $ITER &
+            CUDA_VISIBLE_DEVICES=0 python experiment.py --dir $DIR --env $ENV --data_mode _formal --concat_state_pref $CSP --concat_rtg_pref $CRP --concat_act_pref $CAP --mo_rtg True --seed 5 --dataset amateur_uniform --model_type $MODEL --num_steps_per_iter $STEP --max_iters $ITER &
+            CUDA_VISIBLE_DEVICES=0 python experiment.py --dir $DIR --env $ENV --data_mode _formal --concat_state_pref $CSP --concat_rtg_pref $CRP --concat_act_pref $CAP --mo_rtg True --seed 6 --dataset amateur_uniform --model_type $MODEL --num_steps_per_iter $STEP --max_iters $ITER &
             wait
         done
     done
 done
+
+# python experiment.py --dir experiment_runs/uniform --env MO-Ant-v2 --data_mode _formal --concat_state_pref 1 --concat_rtg_pref 1 --concat_act_pref 1 --mo_rtg True --seed 1 --dataset expert_wide --model_type dt --num_steps_per_iter 10000 --max_iters 2

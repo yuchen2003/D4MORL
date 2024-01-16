@@ -24,7 +24,8 @@ class Trainer:
         eval_only=False,
         concat_rtg_pref=0,
         concat_act_pref=0,
-        logsdir='./'
+        logsdir='./',
+        use_p_bar=False,
         
     ):
         self.model = model
@@ -48,20 +49,22 @@ class Trainer:
         self.logsdir = logsdir
         self.diagnostics = dict()
         self.start_time = time.time()
+        self.use_p_bar = use_p_bar
 
     def train_iteration(self, ep):
         train_losses = []
         logs = dict()
+        
         train_start = time.time()
         if not self.eval_only:
+            print("training: iter=", ep)
             self.model.train()
-            for ite in tqdm(range(self.n_steps_per_iter), disable=True):
+            for ite in tqdm(range(self.n_steps_per_iter), disable=not self.use_p_bar):
                 train_loss = self.train_step()
                 train_losses.append(train_loss)
                 if self.scheduler is not None:
                     self.scheduler.step()
                     
-
         logs['time/training'] = time.time() - train_start
         eval_start = time.time()
         self.model.eval()

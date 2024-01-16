@@ -124,7 +124,7 @@ def dirichlet_preference(pref_dim, pref_range, n_alpha=1, n_pref_each_alpha=1):
     return preferences
 
 default_dirichlet_wide = lambda pref_dim, n_pref: dirichlet_preference(pref_dim, "wide", n_pref, 1)
-defualt_dirichlet_narrow = lambda pref_dim, n_pref: dirichlet_preference(pref_dim, "narrow", n_pref, 1)
+default_dirichlet_narrow = lambda pref_dim, n_pref: dirichlet_preference(pref_dim, "narrow", n_pref, 1)
 
 def uniform_preference(pref_dim, n_pref):
     k = np.array([np.random.exponential(scale=1.0, size=pref_dim) for _ in range(n_pref)])
@@ -138,7 +138,7 @@ class PrefDist:
         elif preference_type == "wide":
             self.pref_func = default_dirichlet_wide
         elif preference_type == "narrow":
-            self.pref_func = defualt_dirichlet_narrow
+            self.pref_func = default_dirichlet_narrow
     
     def __call__(self, pref_dim, n_pref):
         return self.pref_func(pref_dim, n_pref)
@@ -209,11 +209,10 @@ def eval_collect(args, samples, n_obj):
     # here we try to decide the best single-obj to use for rollout
     getPolicyId = GetPolicyId(objs_normalized)
     policy_ids = getPolicyId(sampled_preferences)
+    
     with torch.no_grad():
 
         for i in tqdm(range(args.num_traj), disable=(not args.p_bar)):
-            
-            
             preference = sampled_preferences[i, :]
             datas = defaultdict(list)
             

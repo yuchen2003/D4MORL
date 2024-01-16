@@ -112,3 +112,5 @@ __pycache__
 *.pkl
 *.gif
 logs/
+experiment_runs/
+*.ipynb

@@ -47,6 +47,7 @@ def experiment(
 ):
     env_name = variant['env']
     dataset = variant['dataset']
+    num_traj = variant['num_traj']
     device = variant['device']
     log_to_wandb = variant['log_to_wandb']
     model_type = variant['model_type']
@@ -72,7 +73,9 @@ def experiment(
     rtg_scale = variant['rtg_scale']
     granularity = variant['granularity']
     use_max_rtg = variant['use_max_rtg']
+    use_p_bar = variant['use_p_bar']
     
+    # Model, Trainer, Evaluator
     if model_type == 'dt':
         from modt.training.seq_trainer import SequenceTrainer as Trainer
         from modt.evaluation.evaluator_dt import EvaluatorDT as Evaluator
@@ -86,6 +89,10 @@ def experiment(
         from modt.training.rvs_trainer import RVSTrainer as Trainer
         from modt.evaluation.evaluator_rvs import EvaluatorRVS as Evaluator
         from rvs.src.rvs.policies import RvS as Model
+    elif model_type == 'cql':
+        pass
+    else:
+        raise ValueError(f"Unrecognized model: {model_type}")
     
     if optimizer_name == "adam":
         from torch.optim import AdamW as Optimizer
@@ -112,7 +119,8 @@ def experiment(
         scale *= 10
     
     # if using multiple dataset, load all at once
-    dataset_paths = [f"data/{env_name}/{env_name}_50000_{d}.pkl" for d in dataset]
+    generation_path = "data_generation/data_collected"
+    dataset_paths = [f"{generation_path}/{env_name}/{env_name}_{num_traj}_new{d}.pkl" for d in dataset]
     trajectories = []
     for data_path in dataset_paths:
         with open(data_path, 'rb') as f:
@@ -135,7 +143,13 @@ def experiment(
         returns.append(traj['rewards'].sum())
         returns_mo.append(traj['raw_rewards'].sum(axis=0))
         preferences.append(traj['preference'][0, :])
-        
+    
+    # padding a few (~34/50000) state trajs with 0 to be as long as others.
+    traj_max_len = np.max([len(s) for s in states])
+    for i, s in enumerate(states):
+        if len(s) < traj_max_len:
+            states[i] = np.pad(s, ((0, traj_max_len - len(s)), (0, 0)), mode='constant')
+
     traj_lens, returns, returns_mo, states, preferences = np.array(traj_lens), np.array(returns), np.array(returns_mo), np.array(states), np.array(preferences)
 
     if not isCloseToOne(percent_dt):
@@ -168,10 +182,10 @@ def experiment(
     min_prefs = np.min(preferences, axis=0)
     if concat_act_pref == 0 and concat_rtg_pref == 0 and concat_state_pref == 0 and model_type == "bc":
         granularity = 1
-    prefs = pref_grid(pref_dim, granularity=granularity)
+    prefs = pref_grid(pref_dim, granularity=granularity) # [?] use min/max_prefs ?
     print('=' * 50)
     print(f'Starting new experiment: {env_name} {"_".join(dataset)}')
-    print(f'{len(traj_lens)} trajectories, {sum(traj_lens)} timesteps found')
+    print(f'{len(traj_lens)} trajectories, {sum(traj_lens)} timesteps found, all trajectories are padded to length {traj_max_len}.')
     print(f'Average return: {np.mean(returns):.2f}, std: {np.std(returns):.2f}')
     print(f'Max return: {np.max(returns):.2f}, min: {np.min(returns):.2f}')
     print('=' * 50)
@@ -226,7 +240,7 @@ def experiment(
         logsdir=logsdir,
         eval_only=eval_only
     )
-    # this simply returns a list of lists of callable function objects
+    # this simply returns a list of callable function objects
     # each is initialized with the specific evaluator, and init-pref + init-rtg
     eval_episodes = EvalEpisode(
         evaluator=evaluator,
@@ -284,7 +298,7 @@ def experiment(
             reward_conditioning=True,
             env_name=env_name,
         ).to(device=device)
-        model.state_dim = state_dim
+        model.state_dim = state_dim # [?] redundant ?
         model.act_dim = act_dim
         model.pref_dim = pref_dim
         model.rtg_dim = rtg_dim
@@ -344,7 +358,8 @@ def experiment(
         eval_only=eval_only,
         concat_rtg_pref=concat_rtg_pref,
         concat_act_pref=concat_act_pref,
-        logsdir=logsdir
+        logsdir=logsdir,
+        use_p_bar=use_p_bar,
     )
     
     
@@ -378,7 +393,8 @@ def experiment(
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--env', type=str, default='MO-Hopper-v2')
-    parser.add_argument('--dataset', type=str, nargs='+', default=['expert_highh'])
+    parser.add_argument('--dataset', type=str, nargs='+', default=['expert_uniform'])
+    parser.add_argument('--num_traj', type=int, default=50000)
     parser.add_argument('--data_mode', type=str, default='')
     parser.add_argument('--ckpt', type=str, default='')
     parser.add_argument('--mode', type=str, default='normal')  # normal for standard setting, delayed for sparse
@@ -398,15 +414,15 @@ if __name__ == '__main__':
     parser.add_argument('--max_iters', type=int, default=100)
     parser.add_argument('--num_steps_per_iter', type=int, default=5000)
     parser.add_argument('--device', type=str, default='cuda')
-    parser.add_argument('--dir', type=str, default='test_dir')
+    parser.add_argument('--dir', type=str, default='experiment_runs')
     parser.add_argument('--log_to_wandb', type=bool, default=False)
     parser.add_argument('--wandb_group', type=str, default='none')
     parser.add_argument('--use_obj', type=int, default=-1) # decay to only 1-obj scenario. -1 default means nothing is decayed
     parser.add_argument('--percent_dt', type=float, default=1) # make DT to only use top% of data, default would be 99%
     parser.add_argument('--use_pref_predict_action', type=bool, default=False)
-    parser.add_argument('--concat_state_pref', type=int, default=0)
-    parser.add_argument('--concat_rtg_pref', type=int, default=0)
-    parser.add_argument('--concat_act_pref', type=int, default=0)
+    parser.add_argument('--concat_state_pref', type=int, default=0) #   |
+    parser.add_argument('--concat_rtg_pref', type=int, default=0)   #   | }-> w/, w/o pref (P)
+    parser.add_argument('--concat_act_pref', type=int, default=0)   #   |
     parser.add_argument('--normalize_reward', type=bool, default=False)
     parser.add_argument('--mo_rtg', type=bool, default=False)
     parser.add_argument('--eval_only', type=bool, default=False)
@@ -416,8 +432,10 @@ if __name__ == '__main__':
     parser.add_argument('--eval_context_length', type=int, default=5)
     parser.add_argument('--rtg_scale', type=float, default=1)
     parser.add_argument('--seed', type=int, default=None)
-    parser.add_argument('--granularity', type=int, default=1)
+    parser.add_argument('--granularity', type=int, default=500) # 501 (input 500), or 325 (input 324) for hopper-v3
     parser.add_argument('--use_max_rtg', type=bool, default=False)
+    parser.add_argument('--use_p_bar', type=bool, default=True)
+    parser.add_argument('--debugging', type=bool, default=False)
     args = parser.parse_args()
     
 
@@ -425,6 +443,9 @@ if __name__ == '__main__':
     seed_everything(seed=seed)
     
     dataset_name = '_'.join(args.dataset)
+    
+    if args.debugging:
+        args.dir = args.dir + "/debug"
     
     args.run_name = f"{args.dir}/{args.env}/{dataset_name}/K={args.K}/mo_rtg={args.mo_rtg}/rtg_scale={int(args.rtg_scale * 100)}/norm_rew={args.normalize_reward}/concat_state_pref={args.concat_state_pref}/concat_rtg_pref={args.concat_rtg_pref}/concat_act_pref={args.concat_act_pref}/percent={args.percent_dt}/batch={args.batch_size}/dim={args.embed_dim}/layers={args.n_layer}/obj={args.use_obj}/use_pref={args.use_pref_predict_action}/return_loss={args.return_loss}/pref_loss={args.pref_loss}/optim={args.optimizer}/seed={seed}"
 

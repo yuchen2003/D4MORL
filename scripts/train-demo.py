@@ -1,13 +1,12 @@
-import environments  # register multi objective envs
 import diffuser.utils as utils
+
 
 #-----------------------------------------------------------------------------#
 #----------------------------------- setup -----------------------------------#
 #-----------------------------------------------------------------------------#
 
 class Parser(utils.Parser):
-    dataset: str = 'MO-Ant-v2'
-    # dataset: str = 'hopper-medium-expert-v2'
+    dataset: str = 'hopper-medium-expert-v2'
     config: str = 'config.locomotion'
 
 args = Parser().parse_args('diffusion')
@@ -26,7 +25,6 @@ dataset_config = utils.Config(
     preprocess_fns=args.preprocess_fns,
     use_padding=args.use_padding,
     max_path_length=args.max_path_length,
-    # dataset_path = './data_generation/data_collected/MO-Ant-v2/MO-Ant-v2_50000_newamateur_narrow.pkl',
 )
 
 render_config = utils.Config(
