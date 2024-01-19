@@ -12,11 +12,11 @@ from gym.spaces.box import Box
 import environments # import to register environments for multi-objective
 from math import isclose
 from modt.evaluation.evaluate_episodes import EvalEpisode
-from modt.training.loader import GetBatch
 from sklearn.linear_model import LinearRegression
 from torch import nn
 from state_norm_params import state_norm_params # we use normalization parameter for states from the behavioral policy
 import random
+import json
 
 isCloseToOne = lambda x: isclose(x, 1, rel_tol=1e-12)
 def pref_grid(n_obj, max_prefs=None, min_prefs=None, granularity=5):
@@ -59,6 +59,7 @@ def experiment(
     percent_dt = variant['percent_dt']
     K = variant['K']
     batch_size = variant['batch_size']
+    cql_batch_size = variant['cql_batch_size']
     num_eval_episodes = variant['num_eval_episodes']
     warmup_steps = variant['warmup_steps']
     normalize_reward = variant['normalize_reward']
@@ -90,9 +91,16 @@ def experiment(
         from modt.evaluation.evaluator_rvs import EvaluatorRVS as Evaluator
         from rvs.src.rvs.policies import RvS as Model
     elif model_type == 'cql':
-        pass
+        from modt.training.cql_trainer import CQLTrainer as Trainer
+        from modt.evaluation.evaluator_cql import EvaluatorCQL as Evaluator
+        from modt.models.cql import CQLModel as Model
     else:
         raise ValueError(f"Unrecognized model: {model_type}")
+    
+    if model_type == 'cql':
+        from modt.training.loader import QGetBatch as GetBatch
+    else:
+        from modt.training.loader import GetBatch
     
     if optimizer_name == "adam":
         from torch.optim import AdamW as Optimizer
@@ -133,6 +141,8 @@ def experiment(
     for traj in trajectories:
         if concat_state_pref != 0:
             traj['observations'] = np.concatenate((traj['observations'], np.tile(traj['preference'], concat_state_pref)), axis=1)
+            if model_type == 'cql':
+                traj['next_observations'] = np.concatenate((traj['next_observations'], np.tile(traj['preference'], concat_state_pref)), axis=1)
             
         if normalize_reward:
             traj['raw_rewards'] = (traj['raw_rewards'] - min_each_obj_step) / (max_each_obj_step - min_each_obj_step)
@@ -184,7 +194,7 @@ def experiment(
         granularity = 1
     prefs = pref_grid(pref_dim, granularity=granularity) # [?] use min/max_prefs ?
     print('=' * 50)
-    print(f'Starting new experiment: {env_name} {"_".join(dataset)}')
+    print(f'Starting new experiment: {model_type} {env_name} {"+".join(dataset)}')
     print(f'{len(traj_lens)} trajectories, {sum(traj_lens)} timesteps found, all trajectories are padded to length {traj_max_len}.')
     print(f'Average return: {np.mean(returns):.2f}, std: {np.std(returns):.2f}')
     print(f'Max return: {np.max(returns):.2f}, min: {np.min(returns):.2f}')
@@ -193,9 +203,9 @@ def experiment(
     sorted_inds = np.argsort(returns)  # lowest to highest
     p_sample = traj_lens[sorted_inds] / sum(traj_lens[sorted_inds])
     get_batch = GetBatch(
-        batch_size=batch_size,
+        batch_size=batch_size if model_type != 'cql' else cql_batch_size,
         # RvS conditions on future avg return, always until the end of traj
-        max_len=K if model_type != 'rvs' else 1,
+        max_len=K if model_type not in ['rvs', 'cql'] else 1,
         max_ep_len=max_ep_len,
         num_trajectories=len(traj_lens),
         p_sample=p_sample,
@@ -291,7 +301,7 @@ def experiment(
             hidden_size=variant['embed_dim'],
             depth=variant['n_layer'],
             learning_rate=variant['learning_rate'],
-            batch_size=batch_size,
+            batch_size=batch_size if model_type != 'cql' else cql_batch_size,
             activation_fn=nn.ReLU,
             dropout_p=variant['dropout'],
             unconditional_policy=False,
@@ -302,22 +312,52 @@ def experiment(
         model.act_dim = act_dim
         model.pref_dim = pref_dim
         model.rtg_dim = rtg_dim
+    elif model_type == "cql":
+        model = Model( # TODO simplify this
+            state_dim=state_dim,
+            act_dim=act_dim,
+            pref_dim=pref_dim,
+            rtg_dim=rtg_dim,
+            hidden_size=variant['embed_dim'],
+            eval_context_length=eval_context_length,
+            max_ep_len=max_ep_len,
+            act_scale=torch.from_numpy(np.array(env.action_space.high)),
+            use_pref=variant['use_pref_predict_action'],
+            concat_state_pref=concat_state_pref,
+            concat_rtg_pref=concat_rtg_pref,
+            concat_act_pref=concat_act_pref,
+            n_layer=variant['n_layer'],
+            n_head=variant['n_head'],
+            n_inner=4*variant['embed_dim'],
+            activation_function=variant['activation_function'],
+            n_positions=1024,
+            resid_pdrop=variant['dropout'],
+            attn_pdrop=variant['dropout'],
+            get_batch = get_batch,
+            action_space = env.action_space
+        ).to(device=device)
     
-    optimizer = Optimizer(
-        model.parameters(),
-        lr=variant['learning_rate'],
-        weight_decay=variant['weight_decay'],
-    )
+    if model_type != "cql":
+        optimizer = Optimizer(
+            model.parameters(),
+            lr=variant['learning_rate'],
+            weight_decay=variant['weight_decay'],
+        )
+        
+        if variant['ckpt'] != '':
+            print(f'[Info] Loading ckpt from {variant["ckpt"]}')
+            ckpt = torch.load(variant['ckpt'])
+            model.load_state_dict(ckpt['model'])
+            optimizer.load_state_dict(ckpt['optimizer'])
 
-    if variant['ckpt'] != '':
-        print(f'[Info] Loading ckpt from {variant["ckpt"]}')
-        ckpt = torch.load(variant['ckpt'])
-        model.load_state_dict(ckpt['model'])
-        optimizer.load_state_dict(ckpt['optimizer'])
+        scheduler = torch.optim.lr_scheduler.LambdaLR(
+            optimizer, lambda steps: min((steps+1)/warmup_steps, 1)
+        )
+    else:
+        optimizer = None
+        scheduler = None
 
-    scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer, lambda steps: min((steps+1)/warmup_steps, 1)
-    )
+    
     # default version only trains on action loss
     if (not pref_loss) and (not return_loss):
         loss_fn = lambda s_hat, a_hat, r_hat, pref_hat, s, a, r, pref: \
@@ -378,10 +418,13 @@ def experiment(
         
         # save model
         filename = f'{ckptdir}/step={step}.ckpt'
-        torch.save({
-            'model': model.state_dict(),
-            'optimizer': optimizer.state_dict()
-        }, filename)
+        if model_type == "cql":
+            model.save_model(filename)
+        else:
+            torch.save({
+                'model': model.state_dict(),
+                'optimizer': optimizer.state_dict()
+            }, filename)
         
         
         # save to wandb
@@ -395,13 +438,14 @@ if __name__ == '__main__':
     parser.add_argument('--env', type=str, default='MO-Hopper-v2')
     parser.add_argument('--dataset', type=str, nargs='+', default=['expert_uniform'])
     parser.add_argument('--num_traj', type=int, default=50000)
-    parser.add_argument('--data_mode', type=str, default='')
+    parser.add_argument('--data_mode', type=str, default='_formal')
     parser.add_argument('--ckpt', type=str, default='')
     parser.add_argument('--mode', type=str, default='normal')  # normal for standard setting, delayed for sparse
-    parser.add_argument('--K', type=int, default=20)
+    parser.add_argument('--K', type=int, default=20) # trajectory horizon
     parser.add_argument('--pct_traj', type=float, default=1.)
     parser.add_argument('--batch_size', type=int, default=64)
-    parser.add_argument('--model_type', type=str, default='dt')  # dt, bc, rvs
+    parser.add_argument('--cql_batch_size', type=int, default=256)
+    parser.add_argument('--model_type', type=str, default='dt')  # dt, bc, rvs, cql
     parser.add_argument('--embed_dim', type=int, default=512)
     parser.add_argument('--n_layer', type=int, default=3) # lamb's default should be 4
     parser.add_argument('--n_head', type=int, default=1) # lamb's default should be 4
@@ -431,23 +475,40 @@ if __name__ == '__main__':
     parser.add_argument('--optimizer', type=str, default="adam") # adam, lamb
     parser.add_argument('--eval_context_length', type=int, default=5)
     parser.add_argument('--rtg_scale', type=float, default=1)
-    parser.add_argument('--seed', type=int, default=None)
+    parser.add_argument('--seed', type=int, default=11111)
     parser.add_argument('--granularity', type=int, default=500) # 501 (input 500), or 325 (input 324) for hopper-v3
     parser.add_argument('--use_max_rtg', type=bool, default=False)
     parser.add_argument('--use_p_bar', type=bool, default=True)
     parser.add_argument('--debugging', type=bool, default=False)
     args = parser.parse_args()
     
+    args.granularity = 500 if args.env != 'MO-Hopper-v3' else 324
+    
+    if args.model_type == 'cql':
+        args.granularity = 50
+    
 
     seed = args.seed if args.seed is not None else np.random.randint(0, 100000)
     seed_everything(seed=seed)
     
-    dataset_name = '_'.join(args.dataset)
+    dataset_name = '+'.join(args.dataset)
     
     if args.debugging:
         args.dir = args.dir + "/debug"
     
-    args.run_name = f"{args.dir}/{args.env}/{dataset_name}/K={args.K}/mo_rtg={args.mo_rtg}/rtg_scale={int(args.rtg_scale * 100)}/norm_rew={args.normalize_reward}/concat_state_pref={args.concat_state_pref}/concat_rtg_pref={args.concat_rtg_pref}/concat_act_pref={args.concat_act_pref}/percent={args.percent_dt}/batch={args.batch_size}/dim={args.embed_dim}/layers={args.n_layer}/obj={args.use_obj}/use_pref={args.use_pref_predict_action}/return_loss={args.return_loss}/pref_loss={args.pref_loss}/optim={args.optimizer}/seed={seed}"
+    # args.run_name = f"{args.dir}/{args.env}/{dataset_name}/K={args.K}/mo_rtg={args.mo_rtg}/rtg_scale={int(args.rtg_scale * 100)}/norm_rew={args.normalize_reward}/concat_state_pref={args.concat_state_pref}/concat_rtg_pref={args.concat_rtg_pref}/concat_act_pref={args.concat_act_pref}/percent={args.percent_dt}/batch={args.batch_size}/dim={args.embed_dim}/layers={args.n_layer}/obj={args.use_obj}/use_pref={args.use_pref_predict_action}/return_loss={args.return_loss}/pref_loss={args.pref_loss}/optim={args.optimizer}/seed={seed}"
+    
+    if args.concat_state_pref + args.concat_act_pref + args.concat_rtg_pref == 0:
+        typ = 'naive'
+    else:
+        typ = 'normal'
+    args.run_name = f"{args.dir}/{args.model_type}/{typ}/{args.env}/{dataset_name}/{args.seed}"
+    
+    if not os.path.exists(args.run_name):
+        os.makedirs(args.run_name)
+    with open(args.run_name + '/config.json', 'w') as f:
+        json_str = json.dumps(vars(args), indent=2)
+        f.write(json_str)
 
     if args.log_to_wandb:
         wandb.init(

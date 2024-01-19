@@ -133,11 +133,11 @@ def uniform_preference(pref_dim, n_pref):
 class PrefDist:
     
     def __init__(self, preference_type):
-        if preference_type == "uniform":
+        if preference_type == "uniform":  # <=> High-H
             self.pref_func = uniform_preference
-        elif preference_type == "wide":
+        elif preference_type == "wide":   # <=> Med-H
             self.pref_func = default_dirichlet_wide
-        elif preference_type == "narrow":
+        elif preference_type == "narrow": # <=> Low-H
             self.pref_func = default_dirichlet_narrow
     
     def __call__(self, pref_dim, n_pref):
@@ -201,7 +201,7 @@ def eval_collect(args, samples, n_obj):
     if args.preference_type == "uniform":
         reject_sampler = RejectSampling(preference_dist, min_each_obj, max_each_obj, n_obj)
         sampled_preferences = reject_sampler.get_preferences(args.num_traj)
-    else:
+    else: # wide
         sampled_preferences = preference_dist(n_obj, args.num_traj) * obj_range + min_each_obj
         sampled_preferences = sampled_preferences / np.sum(sampled_preferences, axis=1, keepdims=True)
         

@@ -3,8 +3,9 @@ import torch
 import time
 from tqdm import tqdm
 from modt.training.visualizer import visualize
-class Trainer:
+from modt.models.cql import CQLModel
 
+class Trainer:
     def __init__(
         self,
         model,
@@ -52,6 +53,12 @@ class Trainer:
         self.use_p_bar = use_p_bar
 
     def train_iteration(self, ep):
+        is_cql = False
+        if type(self.model) is CQLModel:
+            is_cql = True
+            print("[CQL loss contains qf_loss, policy_loss, alpha_loss, alpha_Value]")
+        
+        # 1. Training
         train_losses = []
         logs = dict()
         
@@ -64,16 +71,15 @@ class Trainer:
                 train_losses.append(train_loss)
                 if self.scheduler is not None:
                     self.scheduler.step()
-                    
         logs['time/training'] = time.time() - train_start
+        
+        # 2. Evaluating
         eval_start = time.time()
         self.model.eval()
         cur_step = (ep+1) * self.n_steps_per_iter
 
-
         set_final_return, set_unweighted_raw_return, set_weighted_raw_return, set_cum_r_original = [], [], [], []
         for eval_fn in self.eval_fns:
-            
             outputs, final_returns, unweighted_raw_returns, weighted_raw_returns, cum_r_original = eval_fn(self.model, cur_step)
             set_final_return.append(np.mean(final_returns, axis=0))
             set_unweighted_raw_return.append(np.mean(unweighted_raw_returns, axis=0))
@@ -88,7 +94,6 @@ class Trainer:
         rollout_original_raw_r = np.array(set_cum_r_original)
         target_prefs = np.array([eval_fn.target_pref for eval_fn in self.eval_fns])
         target_returns = np.array([eval_fn.target_reward for eval_fn in self.eval_fns]) # target returns are weighted
-
         
         
         n_obj = self.model.pref_dim
@@ -115,14 +120,17 @@ class Trainer:
             log_file_name = f'{self.logsdir}/step={cur_step}.txt'
             with open(log_file_name, 'a') as f:
                 f.write(f"\n\n\n------------------> epoch: {ep} <------------------")
-                f.write(f"\nloss = {np.mean(train_losses)}")
+                if is_cql:
+                    f.write(f"\nloss = {np.mean(train_losses, axis=1)}") # qf_loss, policy_loss, alpha_loss, alpha_Value
+                else:
+                    f.write(f"\nloss = {np.mean(train_losses)}")
                 for k in self.diagnostics:
                     f.write(f"\n{k} = {self.diagnostics[k]}")
             
             logs['time/total'] = time.time() - self.start_time
             logs['time/evaluation'] = time.time() - eval_start
-            logs['training/train_loss_mean'] = np.mean(train_losses)
-            logs['training/train_loss_std'] = np.std(train_losses)
+            logs['training/train_loss_mean'] = np.mean(train_losses) if not is_cql else np.mean(train_losses, axis=1)
+            logs['training/train_loss_std'] = np.std(train_losses) if not is_cql else np.std(train_losses, axis=1)
 
             for k in self.diagnostics:
                 logs[k] = self.diagnostics[k]
