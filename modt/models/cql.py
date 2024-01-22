@@ -1,4 +1,5 @@
 from shutil import ExecError
+from turtle import numinput
 import numpy as np
 import torch
 import torch.nn as nn
@@ -8,7 +9,6 @@ import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.optim import Adam
 from torch.distributions import Normal
 import numpy as np
 import random
@@ -21,24 +21,31 @@ epsilon = 1e-6
 # *** code is modified from DMBP (DMBP: Diffusion model based predictor for robust offline reinforcement learning against state observation perturbations. (2023).) ***
 
 CQL_config = {
-    "Conservative_Q": int(3),  # int(0) means no Conservative Q term;
     "eval_freq": int(1e4),
     "max_timestep": int(1e6),
     "checkpoint_start": int(9e5),
     "checkpoint_every": int(1e4),
-    "policy": "Deterministic",  # "Gaussian", "Deterministic"
+    "policy": "Gaussian",
+    # "policy": "Deterministic",
     "automatic_entropy_tuning": False,  # Always False for good results
     "iter_repeat_sampling": True,
     "gamma": 0.99,
     "tau": 0.005,
-    "q_lr": 3e-4,
-    "policy_lr": 3e-4,
+    "q_lr": 3e-5,
+    "policy_lr": 3e-5,
     "alpha": 0.2,
-    "batch_size": 256,
-    "hidden_size": 256,
     "target_update_interval": 1,
-    "normalize": False,
+    "normalize": True,
+    "optimizer": 'adam',
 }
+
+if CQL_config['optimizer'] == 'adam':
+    from torch.optim import Adam as Optim
+elif CQL_config['optimizer'] == 'adamw':
+    from torch.optim import AdamW as Optim
+elif CQL_config['optimizer'] == 'SGD':
+    from torch.optim import SGD as Optim
+        
 
 
 #  Part 1 Global Function Definition
@@ -63,46 +70,100 @@ def hard_update(target, source):  # Target will be updated but Source will not c
 #  Part 2 Network Structure Definition
 class QNetwork(
     nn.Module
-):  # Critic (Judge the S+A with Double Q) -> Double Q are independent
-    def __init__(self, num_inputs, num_actions, hidden_dim):
+):  # Critic (Judge the S+P+A with Double Q) -> Double Q are independent
+    def __init__(
+        self, num_inputs, num_actions, hidden_dim, max_length, dropout, n_layer
+    ):
+        """[(SP)A] * max_length -> 1"""
         super(QNetwork, self).__init__()
+        self.max_length = max_length
+        self.num_outputs = max_length
 
         # Q1 architecture
-        self.linear1 = nn.Linear(num_inputs + num_actions, hidden_dim)
-        self.linear2 = nn.Linear(hidden_dim, hidden_dim)
-        self.linear3 = nn.Linear(hidden_dim, 1)
+        # self.linear1 = nn.Linear(num_inputs + num_actions, hidden_dim)
+        # self.linear2 = nn.Linear(hidden_dim, hidden_dim)
+        # self.linear3 = nn.Linear(hidden_dim, 1)
+        q1_layers = [nn.Linear(max_length * (num_inputs + num_actions), hidden_dim)]
+        for _ in range(n_layer - 1):
+            q1_layers.extend(
+                [nn.ReLU(), nn.Dropout(dropout), nn.Linear(hidden_dim, hidden_dim)]
+            )
+        q1_layers.extend(
+            [
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dim, self.num_outputs),
+            ]
+        )
+        self.q1_model = nn.Sequential(*q1_layers)
 
         # Q2 architecture
-        self.linear4 = nn.Linear(num_inputs + num_actions, hidden_dim)
-        self.linear5 = nn.Linear(hidden_dim, hidden_dim)
-        self.linear6 = nn.Linear(hidden_dim, 1)
+        # self.linear4 = nn.Linear(num_inputs + num_actions, hidden_dim)
+        # self.linear5 = nn.Linear(hidden_dim, hidden_dim)
+        # self.linear6 = nn.Linear(hidden_dim, 1)
+        q2_layers = [nn.Linear(max_length * (num_inputs + num_actions), hidden_dim)]
+        for _ in range(n_layer - 1):
+            q2_layers.extend(
+                [nn.ReLU(), nn.Dropout(dropout), nn.Linear(hidden_dim, hidden_dim)]
+            )
+        q2_layers.extend(
+            [
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dim, self.num_outputs),
+            ]
+        )
+        self.q2_model = nn.Sequential(*q2_layers)
 
         self.apply(weights_init_)
 
-    def forward(self, state, action):
-        xu = torch.cat([state, action], -1)  # Network input is [State + Act]
+    def forward(self, states, actions):  # TODO may modify the input here
+        # Network input is [ [State + Preference + Act ] * max_length ]
+        xu = torch.cat([states, actions], dim=-1) # (bs, maxlen, in_dim + act_dim)
+        xu = xu.reshape(states.shape[0], -1)
 
-        x1 = F.relu(self.linear1(xu))
-        x1 = F.relu(self.linear2(x1))
-        x1 = self.linear3(x1)
+        # x1 = F.relu(self.linear1(xu))
+        # x1 = F.relu(self.linear2(x1))
+        # x1 = self.linear3(x1)
+        x1 = self.q1_model(xu).unsqueeze(-1)
 
-        x2 = F.relu(self.linear4(xu))
-        x2 = F.relu(self.linear5(x2))
-        x2 = self.linear6(x2)
+        # x2 = F.relu(self.linear4(xu))
+        # x2 = F.relu(self.linear5(x2))
+        # x2 = self.linear6(x2)
+        x2 = self.q2_model(xu).unsqueeze(-1)
 
         return x1, x2
 
+
 class GaussianPolicy(
     nn.Module
-):  # Gaussian Actor -> log_prod when sampling is NOT 0 (num_input is state_dim)
-    def __init__(self, num_inputs, num_actions, hidden_dim, action_space=None):
+):  # Gaussian Actor -> log_prod when sampling is NOT 0
+    def __init__(
+        self,
+        num_inputs,
+        num_actions,
+        hidden_dim,
+        max_length,
+        dropout,
+        n_layer,
+        action_space=None,
+    ):
         super(GaussianPolicy, self).__init__()
 
-        self.linear1 = nn.Linear(num_inputs, hidden_dim)
-        self.linear2 = nn.Linear(hidden_dim, hidden_dim)
+        # self.linear1 = nn.Linear(num_inputs, hidden_dim)
+        # self.linear2 = nn.Linear(hidden_dim, hidden_dim)
+        self.max_length = max_length
+        self.num_actions = num_actions
+        self.num_outputs = max_length * num_actions
+        enc_layers = [nn.Linear(max_length * num_inputs, hidden_dim)]
+        for _ in range(n_layer - 1):
+            enc_layers.extend(
+                [nn.ReLU(), nn.Dropout(dropout), nn.Linear(hidden_dim, hidden_dim)]
+            )
+        self.enc = nn.Sequential(*enc_layers)  # encoder: SP * len -> hidden_dim
 
-        self.mean_linear = nn.Linear(hidden_dim, num_actions)
-        self.log_std_linear = nn.Linear(hidden_dim, num_actions)
+        self.mean_linear = nn.Linear(hidden_dim, self.num_outputs)
+        self.log_std_linear = nn.Linear(hidden_dim, self.num_outputs)
 
         self.apply(weights_init_)
 
@@ -118,16 +179,21 @@ class GaussianPolicy(
                 (action_space.high + action_space.low) / 2.0
             )
 
-    def forward(self, state):
-        x = F.relu(self.linear1(state))
-        x = F.relu(self.linear2(x))
-        mean = self.mean_linear(x)
-        log_std = self.log_std_linear(x)
+    def forward(self, states):
+        states = states[:, -self.max_length :].reshape(
+            states.shape[0], -1
+        )  # (bs, maxlen * state_dim)
+        
+        # x = F.relu(self.linear1(state))
+        # x = F.relu(self.linear2(x))
+        x = self.enc(states)
+        mean = self.mean_linear(x).reshape(-1, self.max_length, self.num_actions)
+        log_std = self.log_std_linear(x).reshape(-1, self.max_length, self.num_actions)
         log_std = torch.clamp(log_std, min=LOG_SIG_MIN, max=LOG_SIG_MAX)
         return mean, log_std
 
-    def sample(self, state):
-        mean, log_std = self.forward(state)
+    def sample(self, states):
+        mean, log_std = self.forward(states)
         std = log_std.exp()
         # logger.info(f"Mean is {mean} and Std is {std}")
         normal = Normal(mean, std)
@@ -138,7 +204,7 @@ class GaussianPolicy(
         # Enforcing Action Bound
         log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + epsilon)
         log_prob = log_prob.sum(1, keepdim=True)
-        mean = torch.tanh(mean) * self.action_scale + self.action_bias
+        mean = torch.tanh(mean.reshape(-1, self.max_length, self.num_actions)) * self.action_scale + self.action_bias
         return action, log_prob, mean
 
     def to(self, device):
@@ -149,14 +215,32 @@ class GaussianPolicy(
 
 class DeterministicPolicy(
     nn.Module
-):  # Deterministic Actor -> log_prod when sampling is 0 (num_input is state_dim)
-    def __init__(self, num_inputs, num_actions, hidden_dim, action_space=None):
+):  # Deterministic Actor -> log_prod when sampling is 0
+    def __init__(
+        self,
+        num_inputs,
+        num_actions,
+        hidden_dim,
+        max_length,
+        dropout,
+        n_layer,
+        action_space=None,
+    ):
         super(DeterministicPolicy, self).__init__()
-        self.linear1 = nn.Linear(num_inputs, hidden_dim)
-        self.linear2 = nn.Linear(hidden_dim, hidden_dim)
+        # self.linear1 = nn.Linear(num_inputs, hidden_dim)
+        # self.linear2 = nn.Linear(hidden_dim, hidden_dim)
+        self.max_length = max_length
+        self.num_actions = num_actions
+        self.num_outputs = max_length * num_actions
+        enc_layers = [nn.Linear(max_length * num_inputs, hidden_dim)]
+        for _ in range(n_layer - 1):
+            enc_layers.extend(
+                [nn.ReLU(), nn.Dropout(dropout), nn.Linear(hidden_dim, hidden_dim)]
+            )
+        self.enc = nn.Sequential(*enc_layers)  # encoder: SP * len -> hidden_dim
 
-        self.mean = nn.Linear(hidden_dim, num_actions)
-        self.noise = torch.Tensor(num_actions)
+        self.mean = nn.Linear(hidden_dim, self.num_outputs)
+        self.noise = torch.Tensor(1, max_length, num_actions)
 
         self.apply(weights_init_)
 
@@ -172,18 +256,23 @@ class DeterministicPolicy(
                 (action_space.high + action_space.low) / 2.0
             )
 
-    def forward(self, state):
-        x = F.relu(self.linear1(state))
-        x = F.relu(self.linear2(x))
-        mean = torch.tanh(self.mean(x)) * self.action_scale + self.action_bias
+    def forward(self, states):
+        states = states[:, -self.max_length :].reshape(
+            states.shape[0], -1
+        )  # (bs, maxlen * state_dim)
+        # x = F.relu(self.linear1(state))
+        # x = F.relu(self.linear2(x))
+        
+        x = self.enc(states)
+        mean = torch.tanh(self.mean(x).reshape(-1, self.max_length, self.num_actions)) * self.action_scale + self.action_bias
         return mean
 
-    def sample(self, state):
-        mean = self.forward(state)
-        noise = self.noise.normal_(0., std=0.1) # Noise is Normal(mu=0, std=0.1)
+    def sample(self, states):
+        means = self.forward(states)
+        noise = self.noise.normal_(0.0, std=0.1)  # Noise is Normal(mu=0, std=0.1)
         noise = noise.clamp(-0.25, 0.25)
-        action = mean + noise
-        return action, torch.tensor(0.), mean
+        actions = means + noise
+        return actions, torch.tensor(0.0), means
 
     def to(self, device):
         self.action_scale = self.action_scale.to(device)
@@ -193,33 +282,66 @@ class DeterministicPolicy(
 
 
 #  Part 3 Agent Class Definition
-class CQL(object):
-    def __init__(self, num_inputs, action_space, device="cuda", config=CQL_config, get_batch=None, concat_state_pref=False):
+class CQLModel(TrajectoryModel):
+    def __init__(
+        self,
+        state_dim,
+        act_dim,
+        pref_dim,
+        n_layer=3,
+        dropout=0.1,
+        max_length=1,  # K=20
+        hidden_size=512,
+        action_space=None,
+        cons_q=3,
+        device="cuda",
+        config=CQL_config,
+        concat_state_pref=False,
+        warmup_steps=10000,
+        *args,
+        **kwargs,
+    ):
+        # 0. hyper-parameters
+        super().__init__(state_dim, act_dim, pref_dim)  # -> self.~ = ~
         self.gamma = config["gamma"]  # 0.99
         self.tau = config["tau"]  # 0.005
         self.alpha = config["alpha"]  # 0.2
+        self.policy_type = config["policy"]  # Gaussian or Deterministic
         self.action_space = action_space
-
-        self.policy_type = config["policy"]  # Gaussian
-        # self.policy_type = policy_type
         self.target_update_interval = config["target_update_interval"]  # 1
         self.automatic_entropy_tuning = config["automatic_entropy_tuning"]  # False
         self.device = device  # cuda or cpu
-        self.Conservative_Q = config["Conservative_Q"]  # int(0), int(1), int(2), int(3)
+        self.Conservative_Q = cons_q
+        self.max_length = max_length
 
+        num_inputs = state_dim
+
+        # 1. Critic network -> critic, critic_target, critic_optim
         self.critic = QNetwork(
-            num_inputs, action_space.shape[0], config["hidden_size"]
-        ).to(
-            device=self.device
-        )  # 256
-        self.critic_optim = Adam(self.critic.parameters(), lr=config["q_lr"])  # 0.0003
+            num_inputs,
+            action_space.shape[0],
+            hidden_size,
+            max_length,
+            dropout,
+            n_layer,
+        ).to(device=self.device)
+        self.critic_optim = Optim(self.critic.parameters(), lr=config["q_lr"])
+        self.critic_sched = torch.optim.lr_scheduler.LambdaLR(
+            self.critic_optim, lambda steps: min((steps+1)/warmup_steps, 1)
+        )
+
         self.critic_target = QNetwork(
-            num_inputs, action_space.shape[0], config["hidden_size"]
+            num_inputs,
+            action_space.shape[0],
+            hidden_size,
+            max_length,
+            dropout,
+            n_layer,
         ).to(self.device)
+
         hard_update(self.critic_target, self.critic)
 
-        self.step = 0
-
+        # 2. Actor/Policy network -> policy, policy_optim
         if self.policy_type == "Gaussian":
             # Target Entropy = −dim(A) (e.g. , -6 for HalfCheetah-v2) as given in the paper
             if self.automatic_entropy_tuning is True:
@@ -227,263 +349,112 @@ class CQL(object):
                     torch.Tensor(action_space.shape).to(self.device)
                 ).item()
                 self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
-                self.alpha_optim = Adam([self.log_alpha], lr=config["policy_lr"])
+                self.alpha_optim = Optim([self.log_alpha], lr=config["policy_lr"])
 
             self.policy = GaussianPolicy(
-                num_inputs, action_space.shape[0], config["hidden_size"], action_space
+                num_inputs,
+                action_space.shape[0],
+                hidden_size,
+                max_length,
+                dropout,
+                n_layer,
+                action_space,
             )
             self.policy.to(self.device)
-            self.policy_optim = Adam(self.policy.parameters(), lr=config["policy_lr"])
+            self.policy_optim = Optim(self.policy.parameters(), lr=config["policy_lr"])
 
         else:  # Deterministic Do not allow autotune alpha value as alpha will always be 0
             self.alpha = 0
             self.automatic_entropy_tuning = False
             self.policy = DeterministicPolicy(
-                num_inputs, action_space.shape[0], config["hidden_size"], action_space
+                num_inputs,
+                action_space.shape[0],
+                hidden_size,
+                max_length,
+                dropout,
+                n_layer,
+                action_space,
             )
             self.policy.to(self.device)
-            self.policy_optim = Adam(self.policy.parameters(), lr=config["policy_lr"])
+            self.policy_optim = Optim(self.policy.parameters(), lr=config["policy_lr"])
+        self.policy_sched = torch.optim.lr_scheduler.LambdaLR(
+            self.policy_optim, lambda steps: min((steps+1)/warmup_steps, 1)
+        )
 
-        self.get_batch = get_batch
-
-    def select_action(self, state, evaluate=True):
-        if not torch.is_tensor(state):
-            state = torch.FloatTensor(state.reshape(1, -1)).to(self.device)
-        input_dim = state.shape[0]
-        if evaluate is False:  # With Noise
-            action, _, _ = self.policy.sample(state)
-        else:  # No Noise
-            _, _, action = self.policy.sample(state)
-        if input_dim == 1:
-            return action.detach().cpu().numpy()[0]
-        else:
-            return action
-
-    def train_step(self, is_write_log=False):
-        state_batch, action_batch, reward_batch, next_state_batch, pref = self.get_batch() # TODO check the code below
-        # if self.concat_state_pref: # Note that this is done in experiment.py
-        #     state_batch = torch.cat([state_batch, pref], axis=-1)
-        #     next_state_batch = torch.cat([next_state_batch, pref], axis=-1)
-        batch_size = self.get_batch.batch_size
+    def get_action(self, states):
+        states = states.reshape(states.shape[0], -1, self.state_dim)
         
-        # Network Updating
-        # Core Step1 is to update the Critic Network
-        with torch.no_grad():
-            next_state_action, next_state_log_pi, _ = self.policy.sample(
-                next_state_batch
+        if states.shape[1] < self.max_length:
+            states = torch.cat(
+                [
+                    torch.zeros(
+                        (states.shape[0], self.max_length - states.shape[1], self.state_dim),
+                        dtype=torch.float32,
+                        device=states.device,
+                    ),
+                    states, # the last one(s)
+                ],
+                dim=1,
             )
-            qf1_next_target, qf2_next_target = self.critic_target(
-                next_state_batch, next_state_action
-            )
-            min_qf_next_target = (
-                torch.min(qf1_next_target, qf2_next_target)
-                - self.alpha * next_state_log_pi
-            )
-            next_q_value = reward_batch + self.gamma * (
-                min_qf_next_target
-            )
-        qf1, qf2 = self.critic(state_batch, action_batch)
-        qf1_loss = F.mse_loss(qf1, next_q_value)
-        qf2_loss = F.mse_loss(qf2, next_q_value)
-        # Conservative term loss:
-        if self.Conservative_Q == 0:  # Core Q0 No Conservative Term
-            qf_loss = qf1_loss + qf2_loss
-
-        elif self.Conservative_Q == 1:  # Core Q1 Conservative Term is Q itself
-            qf1_cql_loss = qf1.mean()
-            qf2_cql_loss = qf2.mean()
-            qf_loss = qf1_loss + qf2_loss + qf1_cql_loss + qf2_cql_loss
-
-        elif (
-            self.Conservative_Q == 2 or self.Conservative_Q == 3
-        ):  # Core Q2 and Q3 Conservative Term is final version
-            SP_act = 10
-            cql_temp = 1
-            cql_clip_diff_min = -1e6
-            cql_clip_diff_max = 1e6
-            cql_lagrange = False
-            cql_weight = 5.0
-            with torch.no_grad():
-                cql_random_actions = next_state_action.new_empty(
-                    (batch_size, self.action_space.shape[0], SP_act),
-                    requires_grad=False,
-                ).uniform_(-1, 1)
-                cql_current_actions = next_state_action.new_empty(
-                    (batch_size, self.action_space.shape[0], SP_act),
-                    requires_grad=False,
-                )
-                cql_current_log_pis = next_state_action.new_empty(
-                    (batch_size, self.action_space.shape[0], SP_act),
-                    requires_grad=False
-                )
-                cql_next_actions = next_state_action.new_empty(
-                    (batch_size, self.action_space.shape[0], SP_act),
-                    requires_grad=False,
-                )
-                cql_next_log_pis = next_state_action.new_empty(
-                    (batch_size, self.action_space.shape[0], SP_act),
-                    requires_grad=False,
-                )
-                for k in range(SP_act):
-                    (
-                        cql_current_actions[:, :, k],
-                        cql_current_log_pis[:, :, k],
-                        _,
-                    ) = self.policy.sample(state_batch)
-                    (
-                        cql_next_actions[:, :, k],
-                        cql_next_log_pis[:, :, k],
-                        _,
-                    ) = self.policy.sample(next_state_batch)
-            cql_q1_rand = qf1.new_empty((batch_size, 1, SP_act))
-            cql_q2_rand = qf2.new_empty((batch_size, 1, SP_act))
-            cql_q1_current = qf1.new_empty((batch_size, 1, SP_act))
-            cql_q2_current = qf2.new_empty((batch_size, 1, SP_act))
-            cql_q1_next = qf1.new_empty((batch_size, 1, SP_act))
-            cql_q2_next = qf2.new_empty((batch_size, 1, SP_act))
-
-            for k in range(SP_act):
-                cql_q1_rand[:, :, k], cql_q2_rand[:, :, k] = self.critic(
-                    state_batch, cql_random_actions[:, :, k]
-                )
-                cql_q1_current[:, :, k], cql_q2_current[:, :, k] = self.critic(
-                    state_batch, cql_current_actions[:, :, k]
-                )
-                cql_q1_next[:, :, k], cql_q2_next[:, :, k] = self.critic(
-                    state_batch, cql_next_actions[:, :, k]
-                )
-
-            cql_cat_q1 = torch.cat(
-                [cql_q1_rand, torch.unsqueeze(qf1, -1), cql_q1_next, cql_q1_current],
-                dim=-1,
-            )
-            cql_cat_q2 = torch.cat(
-                [cql_q2_rand, torch.unsqueeze(qf2, -1), cql_q2_next, cql_q2_current],
-                dim=-1,
-            )
-
-            if self.Conservative_Q == 3:
-                # random_density = np.log(0.5 ** self.action_space.shape[0]) # TODO can simplify
-                random_density = self.action_space.shape[0] * np.log(0.5)
-                cql_cat_q1 = torch.cat(
-                    [
-                        cql_q1_rand - random_density,
-                        cql_q1_next - torch.mean(cql_next_log_pis, dim=-2, keepdim=True),
-                        cql_q1_current - torch.mean(cql_current_log_pis, dim=-2, keepdim=True),
-                    ],
-                    dim=-1,
-                )
-                cql_cat_q2 = torch.cat(
-                    [
-                        cql_q2_rand - random_density,
-                        cql_q2_next - torch.mean(cql_next_log_pis, dim=-2, keepdim=True),
-                        cql_q2_current - torch.mean(cql_current_log_pis, dim=-2, keepdim=True),
-                    ],
-                    dim=-1,
-                )
-
-            cql_qf1_ood = torch.logsumexp(cql_cat_q1 / cql_temp, dim=-1) * cql_temp
-            cql_qf2_ood = torch.logsumexp(cql_cat_q2 / cql_temp, dim=-1) * cql_temp
-
-            """Subtract the log likelihood of data"""
-            cql_qf1_diff = torch.clamp(
-                cql_qf1_ood - qf1, cql_clip_diff_min, cql_clip_diff_max
-            ).mean()
-            cql_qf2_diff = torch.clamp(
-                cql_qf2_ood - qf2, cql_clip_diff_min, cql_clip_diff_max
-            ).mean()
-
-            # if cql_lagrange:
-            #     alpha_prime = torch.clamp(torch.exp(self.log_alpha_prime()), min=0.0, max=1000000.0)
-            #     cql_min_qf1_loss = alpha_prime * self.config.cql_min_q_weight * (
-            #                 cql_qf1_diff - self.config.cql_target_action_gap)
-            #     cql_min_qf2_loss = alpha_prime * self.config.cql_min_q_weight * (
-            #                 cql_qf2_diff - self.config.cql_target_action_gap)
-            #
-            #     self.alpha_prime_optimizer.zero_grad()
-            #     alpha_prime_loss = (-cql_min_qf1_loss - cql_min_qf2_loss) * 0.5
-            #     alpha_prime_loss.backward(retain_graph=True)
-            #     self.alpha_prime_optimizer.step()
-            # else:
-            cql_min_qf1_loss = cql_qf1_diff * cql_weight
-            cql_min_qf2_loss = cql_qf2_diff * cql_weight
-            # alpha_prime_loss = observations.new_tensor(0.0)
-            # alpha_prime = observations.new_tensor(0.0)
-
-            qf_loss = qf1_loss + qf2_loss + cql_min_qf1_loss + cql_min_qf2_loss
         
-        # logger.info(f"qf_loss = {qf_loss.cpu()}")
-        self.critic_optim.zero_grad()
-        qf_loss.backward()
-        self.critic_optim.step()
-
-        # Core Step2 is to update the Actor Network
-        pi, log_pi, _ = self.policy.sample(state_batch)
-        qf1_pi, qf2_pi = self.critic(state_batch, pi)
-        min_qf_pi = torch.min(qf1_pi, qf2_pi)
-        policy_loss = ((self.alpha * log_pi) - min_qf_pi).mean()
-        # logger.info(f"log_pi = {log_pi.mean().cpu()}")
-        self.policy_optim.zero_grad()
-        policy_loss.backward()
-        self.policy_optim.step()
-
-        # Core Step3 is to update the Autotune Factor
-        if self.automatic_entropy_tuning:
-            alpha_loss = -(
-                self.log_alpha * (log_pi + self.target_entropy).detach()
-            ).mean()
-            self.alpha_optim.zero_grad()
-            alpha_loss.backward()
-            self.alpha_optim.step()
-            self.alpha = self.log_alpha.exp()
-        else:
-            alpha_loss = torch.tensor(0.0).to(self.device)
-
-        # Core Step4 is to Soft-update the Target
-        soft_update(self.critic_target, self.critic, self.tau)
-        alpha_Value = self.alpha
-
-        if is_write_log and self.step % 100 == 0:
-            wandb.log(
-                {
-                    "Q Loss": qf_loss.item(),
-                    "Actor Loss": policy_loss.item(),
-                    "Alpha Loss": alpha_loss.item(),
-                    "Alpha Value": alpha_Value,
-                },
-                step=self.step,
-            )
-        if self.step % 10000 == 0:
-            print(f"losses: qf:{qf_loss.item()}, policy:{policy_loss.item()}, alpha_loss:{alpha_loss.item()}, alpha_value:{alpha_Value}")
-        self.step += 1
+        # states_compli = states[:, [-1], :].repeat((1, self.max_length - states.shape[1], 1))
+        # states = torch.cat([states_compli, states], dim=1)
         
-        return qf_loss.item(), policy_loss.item(), alpha_loss.item(), alpha_Value
+        states = states.to(dtype=torch.float32)
+        _, _, actions = self.policy.sample(states)  # -> actions, log_probs, means
+        actions = actions.reshape(states.shape[0], -1, self.act_dim)
+        return actions[0, -1]
+
+    def forward(self, states):
+        actions, _, _ = self.policy.sample(states)
+        actions = actions.reshape(states.shape[0], -1, self.act_dim)
+
+        return actions
+    
+    def train(self) -> None:
+        self.policy.train()
+        self.critic.train()
+        self.critic_target.train()
+
+    def eval(self) -> None:
+        self.policy.eval()
+        self.critic.eval()
+        self.critic_target.eval()
 
     # Save model parameters
     def save_model(self, file_name):
         # logger.info('Saving models to {}'.format(file_name))
-        print('Saving models to {}'.format(file_name))
-        torch.save({'policy_state_dict': self.policy.state_dict(),
-                    'critic_state_dict': self.critic.state_dict(),
-                    'critic_target_state_dict': self.critic_target.state_dict(),
-                    'critic_optimizer_state_dict': self.critic_optim.state_dict(),
-                    'policy_optimizer_state_dict': self.policy_optim.state_dict()}, file_name)
+        print("Saving models to {}".format(file_name))
+        torch.save(
+            {
+                "policy_state_dict": self.policy.state_dict(),
+                "critic_state_dict": self.critic.state_dict(),
+                "critic_target_state_dict": self.critic_target.state_dict(),
+                "critic_optimizer_state_dict": self.critic_optim.state_dict(),
+                "policy_optimizer_state_dict": self.policy_optim.state_dict(),
+                "critic_scheduler_state_dict": self.critic_sched.state_dict(),
+                "policy_scheduler_state_dict": self.policy_sched.state_dict(),
+            },
+            file_name,
+        )
 
     # Load model parameters
     def load_model(self, filename, device_idx=0, evaluate=False):
         # logger.info(f'Loading models from {filename}')
-        print(f'Loading models from {filename}')
+        print(f"Loading models from {filename}")
         if filename is not None:
             if device_idx == -1:
-                checkpoint = torch.load(filename, map_location=f'cpu')
+                checkpoint = torch.load(filename, map_location=f"cpu")
             else:
-                checkpoint = torch.load(filename, map_location=f'cuda:{device_idx}')
+                checkpoint = torch.load(filename, map_location=f"cuda:{device_idx}")
 
-            self.policy.load_state_dict(checkpoint['policy_state_dict'])
-            self.critic.load_state_dict(checkpoint['critic_state_dict'])
-            self.critic_target.load_state_dict(checkpoint['critic_target_state_dict'])
-            self.critic_optim.load_state_dict(checkpoint['critic_optimizer_state_dict'])
-            self.policy_optim.load_state_dict(checkpoint['policy_optimizer_state_dict'])
+            self.policy.load_state_dict(checkpoint["policy_state_dict"])
+            self.critic.load_state_dict(checkpoint["critic_state_dict"])
+            self.critic_target.load_state_dict(checkpoint["critic_target_state_dict"])
+            self.critic_optim.load_state_dict(checkpoint["critic_optimizer_state_dict"])
+            self.policy_optim.load_state_dict(checkpoint["policy_optimizer_state_dict"])
+            self.critic_sched.load_state_dict(checkpoint["critic_scheduler_state_dict"])
+            self.policy_sched.load_state_dict(checkpoint["policy_scheduler_state_dict"])
             if evaluate:
                 self.policy.eval()
                 self.critic.eval()
@@ -492,50 +463,3 @@ class CQL(object):
                 self.policy.train()
                 self.critic.train()
                 self.critic_target.train()
-
-class CQLModel(TrajectoryModel):
-    def __init__(
-        self,
-        state_dim,
-        act_dim,
-        pref_dim,
-        hidden_size,
-        n_layer,
-        dropout=0.1,
-        max_length=1,
-        action_space=None,
-        get_batch=None,
-        *args,
-        **kwargs,
-    ):
-        assert not (action_space is None)
-        assert not (get_batch is None)
-        
-        super().__init__(state_dim, act_dim, pref_dim)
-        self.concat_state_pref = kwargs['concat_state_pref']
-        self.cql = CQL(
-            num_inputs = state_dim,
-            action_space = action_space,
-            get_batch = get_batch,
-            )
-
-    def forward(
-        self,
-        states,
-        actions=None,
-        rewards=None,
-        attention_mask=None,
-        target_return=None,
-    ):
-        return self.cql.policy.forward(states)
-
-    def get_action(self, states):
-        actions = self.forward(states) # action: (bs, act_dim)
-        action = actions[0]
-        return action
-    
-    def save_model(self, file_name):
-        self.cql.save_model(file_name)
-        
-    def load_model(self, file_name, device_idx=0, evaluate=False):
-        self.cql.load_model(file_name, device_idx, evaluate)

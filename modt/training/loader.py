@@ -200,7 +200,7 @@ class GetBatch:
         return s, a, raw_r, rtg, timesteps, mask, pref
 
 
-class QGetBatch(GetBatch):
+class QGetBatch:
     """For CQL."""
 
     def __init__(
@@ -226,28 +226,27 @@ class QGetBatch(GetBatch):
         use_obj=-1,
         concat_state_pref=0,
     ):
-        super().__init__(
-            batch_size,
-            max_len,
-            max_ep_len,
-            num_trajectories,
-            p_sample,
-            trajectories,
-            sorted_inds,
-            state_dim,
-            act_dim,
-            pref_dim,
-            rtg_dim,
-            state_mean,
-            state_std,
-            scale,
-            device,
-            act_low,
-            act_high,
-            avg_rtg,
-            use_obj,
-            concat_state_pref,
-        )
+        self.batch_size = batch_size
+        self.max_len = max_len
+        self.max_ep_len = max_ep_len
+        self.num_trajectories = num_trajectories
+        self.trajectories = trajectories
+        self.p_sample = p_sample
+        self.sorted_inds = sorted_inds
+        self.state_dim = state_dim
+        self.act_dim = act_dim
+        self.pref_dim = pref_dim
+        self.rtg_dim = rtg_dim
+        self.state_mean = state_mean
+        self.state_std = state_std
+        self.scale = scale
+        self.device = device
+        self.act_low = act_low
+        self.act_high = act_high
+        self.avg_rtg = avg_rtg
+        self.use_obj = use_obj
+        self.gamma = 1.0
+        self.concat_state_pref = concat_state_pref
 
     def __call__(self):
         batch_inds = np.random.choice(
@@ -257,34 +256,87 @@ class QGetBatch(GetBatch):
             p=self.p_sample,
         )
         # state_batch, action_batch, reward_batch, next_state_batch, mask, pref
-        s, a, r, sp, p = [], [], [], [], []
+        s, a, r, sp, p, done = [], [], [], [], [], []
         for i in batch_inds:
             # randomly get the traj from all trajectories
             traj = self.trajectories[int(self.sorted_inds[i])]
             # randomly get the step idx
-            step = random.randint(0, traj["rewards"].shape[0] - 1)
+            step_start = random.randint(0, traj["rewards"].shape[0] - 1)
+            step_end = step_start + self.max_len
 
-            s.append(traj["observations"][step])
+            s.append(
+                traj["observations"][step_start:step_end].reshape(1, -1, self.state_dim)
+            )
             a.append(
                 np.maximum(
                     np.minimum(
-                        traj["actions"][step],
+                        traj["actions"][step_start:step_end].reshape(
+                            1, -1, self.act_dim
+                        ),
                         self.act_high,
                     ),
                     self.act_low,
                 )
                 / self.act_high
             )  # assume scale if relflective to 0 (-x, x)
-            sp.append(traj["next_observations"][step])
-            
-            
-            p.append(traj['preference'][step])
-            r.append(traj['rewards'][step])
-            
-        s, a, r, sp, p = np.array(s), np.array(a), np.array(r), np.array(sp), np.array(p)
-        s = torch.from_numpy(s).to(dtype=torch.float32, device=self.device)
-        a = torch.from_numpy(a).to(dtype=torch.float32, device=self.device)
-        r = torch.from_numpy(r).to(dtype=torch.float32, device=self.device).unsqueeze(-1)
-        sp = torch.from_numpy(sp).to(dtype=torch.float32, device=self.device)
-        p = torch.from_numpy(p).to(dtype=torch.float32, device=self.device)
-        return s, a, r, sp, p
+            sp.append(
+                traj["next_observations"][step_start:step_end].reshape(
+                    1, -1, self.state_dim
+                )
+            )
+
+            p.append(
+                traj["preference"][step_start:step_end].reshape(1, -1, self.pref_dim)
+            )
+            r.append(
+                traj["rewards"][step_start:step_end].reshape(1, -1, 1)
+            )  # as unary vector
+            done.append(
+                traj["terminals"][step_start:step_end].reshape(1, -1, 1)
+            )
+
+            tlen = s[-1].shape[1]
+            s[-1] = np.concatenate(
+                [np.zeros((1, self.max_len - tlen, self.state_dim)), s[-1]], axis=1
+            )
+            a[-1] = np.concatenate(
+                [np.ones((1, self.max_len - tlen, self.act_dim)) * -0.0, a[-1]], axis=1
+            )
+            r[-1] = np.concatenate(
+                [np.zeros((1, self.max_len - tlen, 1)), r[-1]], axis=1
+            )
+            tlen_sp = sp[-1].shape[1]
+            sp[-1] = np.concatenate(
+                [np.zeros((1, self.max_len - tlen_sp, self.state_dim)), sp[-1]], axis=1
+            )
+            p[-1] = np.concatenate(
+                [np.zeros((1, self.max_len - tlen, self.pref_dim)), p[-1]], axis=1
+            )
+            done[-1] = np.concatenate(
+                [np.zeros((1, self.max_len - tlen, 1)), done[-1]], axis=1
+            )
+
+        s = np.clip((s - self.state_mean) / self.state_std, -10, 10)
+        s = torch.from_numpy(np.concatenate(s, axis=0)).to(
+            dtype=torch.float32, device=self.device
+        )
+        a = torch.from_numpy(np.concatenate(a, axis=0)).to(
+            dtype=torch.float32, device=self.device
+        )
+        r = (
+            torch.from_numpy(np.concatenate(r, axis=0)).to(
+                dtype=torch.float32, device=self.device
+            )
+            / self.scale
+        )
+        sp = torch.from_numpy(np.concatenate(sp, axis=0)).to(
+            dtype=torch.float32, device=self.device
+        )
+        p = torch.from_numpy(np.concatenate(p, axis=0)).to(
+            dtype=torch.float32, device=self.device
+        )
+        done = torch.from_numpy(np.concatenate(done, axis=0)).to(
+            dtype=torch.int32, device=self.device
+        )
+
+        return s, a, r, sp, p, done

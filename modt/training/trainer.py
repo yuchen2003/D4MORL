@@ -56,7 +56,7 @@ class Trainer:
         is_cql = False
         if type(self.model) is CQLModel:
             is_cql = True
-            print("[CQL loss contains qf_loss, policy_loss, alpha_loss, alpha_Value]")
+            # print("[CQL loss contains qf_loss, policy_loss, alpha_loss, alpha_Value]")
         
         # 1. Training
         train_losses = []
@@ -64,7 +64,7 @@ class Trainer:
         
         train_start = time.time()
         if not self.eval_only:
-            print("training: iter=", ep)
+            print("training: iter =", ep)
             self.model.train()
             for ite in tqdm(range(self.n_steps_per_iter), disable=not self.use_p_bar):
                 train_loss = self.train_step()
@@ -118,10 +118,10 @@ class Trainer:
         if not self.eval_only:
             cur_step = (ep+1) * self.n_steps_per_iter
             log_file_name = f'{self.logsdir}/step={cur_step}.txt'
-            with open(log_file_name, 'a') as f:
+            with open(log_file_name, 'w') as f:
                 f.write(f"\n\n\n------------------> epoch: {ep} <------------------")
                 if is_cql:
-                    f.write(f"\nloss = {np.mean(train_losses, axis=1)}") # qf_loss, policy_loss, alpha_loss, alpha_Value
+                    f.write(f"\nloss = {np.mean(train_losses, axis=1)}") # qf_loss, policy_loss
                 else:
                     f.write(f"\nloss = {np.mean(train_losses)}")
                 for k in self.diagnostics:

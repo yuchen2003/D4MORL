@@ -36,7 +36,6 @@ class EvaluatorCQL(Evaluator):
                 action = np.multiply(action, self.act_scale)
                 actions.append(action)
 
-
                 state_np, _, done, info = self.eval_env.step(action)
                 
                 cum_r_original += info['obj']
@@ -77,4 +76,6 @@ class EvaluatorCQL(Evaluator):
 
             # use this to save the videos
             # self.decide_save_video(np.multiply(actions.detach().cpu().numpy(), self.act_scale), raw_rewards_cumulative, init_target_return, init_target_pref, seed)
+            
+            # print(f"target_pref:{target_pref}, target_ret:{target_return}, eps_return:{episode_return}, cum_r_original:{cum_r_original}")
             return episode_return, episode_length, unweighted_raw_reward_cumulative, weighted_raw_reward_cumulative_eval, cum_r_original

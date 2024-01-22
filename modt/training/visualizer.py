@@ -439,4 +439,5 @@ def cal_all():
 
 
 if __name__ == "__main__":
-    cal_all()
+    # cal_all()
+    cal_from_data(env_name='MO-Ant-v2')

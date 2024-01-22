@@ -7,6 +7,7 @@ class ActTrainer(Trainer):
 
     def train_step(self):
         states, actions, raw_return, rtg, timesteps, attention_mask, pref = self.get_batch()
+        # states, actions, _, _, _ = self.get_batch() # Qgetbatch
         
         action_target = torch.clone(actions)
         action_preds = self.model.forward(states)

@@ -59,7 +59,6 @@ def experiment(
     percent_dt = variant['percent_dt']
     K = variant['K']
     batch_size = variant['batch_size']
-    cql_batch_size = variant['cql_batch_size']
     num_eval_episodes = variant['num_eval_episodes']
     warmup_steps = variant['warmup_steps']
     normalize_reward = variant['normalize_reward']
@@ -75,6 +74,7 @@ def experiment(
     granularity = variant['granularity']
     use_max_rtg = variant['use_max_rtg']
     use_p_bar = variant['use_p_bar']
+    cons_q = variant['conservative_q']
     
     # Model, Trainer, Evaluator
     if model_type == 'dt':
@@ -97,7 +97,7 @@ def experiment(
     else:
         raise ValueError(f"Unrecognized model: {model_type}")
     
-    if model_type == 'cql':
+    if model_type in ['cql']:
         from modt.training.loader import QGetBatch as GetBatch
     else:
         from modt.training.loader import GetBatch
@@ -141,7 +141,7 @@ def experiment(
     for traj in trajectories:
         if concat_state_pref != 0:
             traj['observations'] = np.concatenate((traj['observations'], np.tile(traj['preference'], concat_state_pref)), axis=1)
-            if model_type == 'cql':
+            if model_type in ['cql']:
                 traj['next_observations'] = np.concatenate((traj['next_observations'], np.tile(traj['preference'], concat_state_pref)), axis=1)
             
         if normalize_reward:
@@ -160,7 +160,7 @@ def experiment(
         if len(s) < traj_max_len:
             states[i] = np.pad(s, ((0, traj_max_len - len(s)), (0, 0)), mode='constant')
 
-    traj_lens, returns, returns_mo, states, preferences = np.array(traj_lens), np.array(returns), np.array(returns_mo), np.array(states), np.array(preferences)
+    traj_lens, returns, returns_mo, states, preferences = np.array(traj_lens), np.array(returns), np.array(returns_mo), np.array(states), np.array(preferences) # [ ] mem-costly
 
     if not isCloseToOne(percent_dt):
         num_traj_wanted = int(percent_dt * len(trajectories))
@@ -173,7 +173,7 @@ def experiment(
         preferences = preferences[indices_wanted, :]
         
 
-    states = np.concatenate(states, axis=0)
+    states = np.concatenate(states, axis=0) # [ ] mem-costly (but will release soon)
     state_mean = state_norm_params[env_name]["mean"]
     state_std = np.sqrt(state_norm_params[env_name]["var"])
     state_mean = np.concatenate((state_mean, np.zeros(concat_state_pref * pref_dim)))
@@ -203,9 +203,9 @@ def experiment(
     sorted_inds = np.argsort(returns)  # lowest to highest
     p_sample = traj_lens[sorted_inds] / sum(traj_lens[sorted_inds])
     get_batch = GetBatch(
-        batch_size=batch_size if model_type != 'cql' else cql_batch_size,
+        batch_size=batch_size,
         # RvS conditions on future avg return, always until the end of traj
-        max_len=K if model_type not in ['rvs', 'cql'] else 1,
+        max_len=K if model_type not in ['rvs'] else 1,
         max_ep_len=max_ep_len,
         num_trajectories=len(traj_lens),
         p_sample=p_sample,
@@ -301,7 +301,7 @@ def experiment(
             hidden_size=variant['embed_dim'],
             depth=variant['n_layer'],
             learning_rate=variant['learning_rate'],
-            batch_size=batch_size if model_type != 'cql' else cql_batch_size,
+            batch_size=batch_size,
             activation_fn=nn.ReLU,
             dropout_p=variant['dropout'],
             unconditional_policy=False,
@@ -313,30 +313,19 @@ def experiment(
         model.pref_dim = pref_dim
         model.rtg_dim = rtg_dim
     elif model_type == "cql":
-        model = Model( # TODO simplify this
+        model = Model(
             state_dim=state_dim,
             act_dim=act_dim,
             pref_dim=pref_dim,
-            rtg_dim=rtg_dim,
-            hidden_size=variant['embed_dim'],
-            eval_context_length=eval_context_length,
-            max_ep_len=max_ep_len,
-            act_scale=torch.from_numpy(np.array(env.action_space.high)),
-            use_pref=variant['use_pref_predict_action'],
-            concat_state_pref=concat_state_pref,
-            concat_rtg_pref=concat_rtg_pref,
-            concat_act_pref=concat_act_pref,
             n_layer=variant['n_layer'],
-            n_head=variant['n_head'],
-            n_inner=4*variant['embed_dim'],
-            activation_function=variant['activation_function'],
-            n_positions=1024,
-            resid_pdrop=variant['dropout'],
-            attn_pdrop=variant['dropout'],
-            get_batch = get_batch,
-            action_space = env.action_space
+            max_length=K, # 
+            hidden_size=variant['embed_dim'], # 512
+            action_space = env.action_space,
+            cons_q=cons_q,
+            concat_state_pref=concat_state_pref,
+            warmup_steps=warmup_steps,
         ).to(device=device)
-    
+        
     if model_type != "cql":
         optimizer = Optimizer(
             model.parameters(),
@@ -444,7 +433,6 @@ if __name__ == '__main__':
     parser.add_argument('--K', type=int, default=20) # trajectory horizon
     parser.add_argument('--pct_traj', type=float, default=1.)
     parser.add_argument('--batch_size', type=int, default=64)
-    parser.add_argument('--cql_batch_size', type=int, default=256)
     parser.add_argument('--model_type', type=str, default='dt')  # dt, bc, rvs, cql
     parser.add_argument('--embed_dim', type=int, default=512)
     parser.add_argument('--n_layer', type=int, default=3) # lamb's default should be 4
@@ -476,25 +464,16 @@ if __name__ == '__main__':
     parser.add_argument('--eval_context_length', type=int, default=5)
     parser.add_argument('--rtg_scale', type=float, default=1)
     parser.add_argument('--seed', type=int, default=11111)
-    parser.add_argument('--granularity', type=int, default=500) # 501 (input 500), or 325 (input 324) for hopper-v3
+    parser.add_argument('--granularity', type=int, default=500) # or 324 for hopper3d
     parser.add_argument('--use_max_rtg', type=bool, default=False)
     parser.add_argument('--use_p_bar', type=bool, default=True)
-    parser.add_argument('--debugging', type=bool, default=False)
+    parser.add_argument('--conservative_q', type=int, default=3)
     args = parser.parse_args()
     
-    args.granularity = 500 if args.env != 'MO-Hopper-v3' else 324
-    
-    if args.model_type == 'cql':
-        args.granularity = 50
-    
-
     seed = args.seed if args.seed is not None else np.random.randint(0, 100000)
     seed_everything(seed=seed)
     
     dataset_name = '+'.join(args.dataset)
-    
-    if args.debugging:
-        args.dir = args.dir + "/debug"
     
     # args.run_name = f"{args.dir}/{args.env}/{dataset_name}/K={args.K}/mo_rtg={args.mo_rtg}/rtg_scale={int(args.rtg_scale * 100)}/norm_rew={args.normalize_reward}/concat_state_pref={args.concat_state_pref}/concat_rtg_pref={args.concat_rtg_pref}/concat_act_pref={args.concat_act_pref}/percent={args.percent_dt}/batch={args.batch_size}/dim={args.embed_dim}/layers={args.n_layer}/obj={args.use_obj}/use_pref={args.use_pref_predict_action}/return_loss={args.return_loss}/pref_loss={args.pref_loss}/optim={args.optimizer}/seed={seed}"
     
@@ -504,11 +483,19 @@ if __name__ == '__main__':
         typ = 'normal'
     args.run_name = f"{args.dir}/{args.model_type}/{typ}/{args.env}/{dataset_name}/{args.seed}"
     
+        
     if not os.path.exists(args.run_name):
         os.makedirs(args.run_name)
     with open(args.run_name + '/config.json', 'w') as f:
         json_str = json.dumps(vars(args), indent=2)
-        f.write(json_str)
+        
+        if args.model_type == 'cql':
+            from modt.models.cql import CQL_config
+            json_str_cql = json.dumps(CQL_config, indent=2)
+        else:
+            json_str_cql = ''
+            
+        f.write('[' + json_str + ',\n\n' + json_str_cql + ']')
 
     if args.log_to_wandb:
         wandb.init(

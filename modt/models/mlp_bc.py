@@ -18,7 +18,7 @@ class MLPBCModel(TrajectoryModel):
         hidden_size,
         n_layer,
         dropout=0.1,
-        max_length=1,
+        max_length=1, # K=20
         *args,
         **kwargs
     ):
@@ -68,7 +68,7 @@ class MLPBCModel(TrajectoryModel):
                         dtype=torch.float32,
                         device=states.device,
                     ),
-                    states,
+                    states, # the last one(s)
                 ],
                 dim=1,
             )
