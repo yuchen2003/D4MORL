@@ -36,10 +36,10 @@ class Trainer(object):
     def __init__(
         self,
         diffusion_model,
-        dataset,
-        renderer,
+        # dataset,
+        # renderer,
         ema_decay=0.995,
-        train_batch_size=32,
+        # train_batch_size=32,
         train_lr=2e-5,
         gradient_accumulate_every=2,
         step_start_ema=2000,
@@ -49,7 +49,7 @@ class Trainer(object):
         save_freq=1000,
         label_freq=100000,
         save_parallel=False,
-        results_folder='./results',
+        results_folder='./diffuser_results',
         n_reference=8,
         bucket=None,
     ):
@@ -66,17 +66,17 @@ class Trainer(object):
         self.label_freq = label_freq
         self.save_parallel = save_parallel
 
-        self.batch_size = train_batch_size
+        # self.batch_size = train_batch_size
         self.gradient_accumulate_every = gradient_accumulate_every
 
-        self.dataset = dataset
-        self.dataloader = cycle(torch.utils.data.DataLoader(
-            self.dataset, batch_size=train_batch_size, num_workers=1, shuffle=True, pin_memory=True
-        ))
-        self.dataloader_vis = cycle(torch.utils.data.DataLoader(
-            self.dataset, batch_size=1, num_workers=0, shuffle=True, pin_memory=True
-        ))
-        self.renderer = renderer
+        # self.dataset = dataset
+        # self.dataloader = cycle(torch.utils.data.DataLoader(
+        #     self.dataset, batch_size=train_batch_size, num_workers=1, shuffle=True, pin_memory=True
+        # ))
+        # self.dataloader_vis = cycle(torch.utils.data.DataLoader(
+        #     self.dataset, batch_size=1, num_workers=0, shuffle=True, pin_memory=True
+        # ))
+        # self.renderer = renderer
         self.optimizer = torch.optim.Adam(diffusion_model.parameters(), lr=train_lr)
 
         self.logdir = results_folder
@@ -99,13 +99,13 @@ class Trainer(object):
     #------------------------------------ api ------------------------------------#
     #-----------------------------------------------------------------------------#
 
-    def train(self, n_train_steps):
+    def train(self, n_train_steps, batch):
 
         timer = Timer()
         for step in range(n_train_steps):
-            for i in range(self.gradient_accumulate_every):
-                batch = next(self.dataloader)
-                batch = batch_to_device(batch)
+            for _ in range(self.gradient_accumulate_every):
+                # batch = next(self.dataloader)
+                # batch = batch_to_device(batch)
 
                 loss, infos = self.model.loss(*batch)
                 loss = loss / self.gradient_accumulate_every
@@ -125,13 +125,15 @@ class Trainer(object):
                 infos_str = ' | '.join([f'{key}: {val:8.4f}' for key, val in infos.items()])
                 print(f'{self.step}: loss: {loss:8.4f} | {infos_str} | t: {timer():8.4f}', flush=True)
 
-            if self.step == 0 and self.sample_freq:
-                self.render_reference(self.n_reference)
+            # if self.step == 0 and self.sample_freq:
+            #     self.render_reference(self.n_reference)
 
-            if self.sample_freq and self.step % self.sample_freq == 0:
-                self.render_samples()
+            # if self.sample_freq and self.step % self.sample_freq == 0:
+            #     self.render_samples()
 
             self.step += 1
+            
+        return loss.item(), infos.items()
 
     def save(self, epoch):
         '''
@@ -163,65 +165,3 @@ class Trainer(object):
     #-----------------------------------------------------------------------------#
     #--------------------------------- rendering ---------------------------------#
     #-----------------------------------------------------------------------------#
-
-    def render_reference(self, batch_size=10):
-        '''
-            renders training points
-        '''
-
-        ## get a temporary dataloader to load a single batch
-        dataloader_tmp = cycle(torch.utils.data.DataLoader(
-            self.dataset, batch_size=batch_size, num_workers=0, shuffle=True, pin_memory=True
-        ))
-        batch = dataloader_tmp.__next__()
-        dataloader_tmp.close()
-
-        ## get trajectories and condition at t=0 from batch
-        trajectories = to_np(batch.trajectories)
-        conditions = to_np(batch.conditions[0])[:,None]
-
-        ## [ batch_size x horizon x observation_dim ]
-        normed_observations = trajectories[:, :, self.dataset.action_dim:]
-        observations = self.dataset.normalizer.unnormalize(normed_observations, 'observations')
-
-        savepath = os.path.join(self.logdir, f'_sample-reference.png')
-        self.renderer.composite(savepath, observations)
-
-    def render_samples(self, batch_size=2, n_samples=2):
-        '''
-            renders samples from (ema) diffusion model
-        '''
-        for i in range(batch_size):
-
-            ## get a single datapoint
-            batch = self.dataloader_vis.__next__()
-            conditions = to_device(batch.conditions, 'cuda:0')
-
-            ## repeat each item in conditions `n_samples` times
-            conditions = apply_dict(
-                einops.repeat,
-                conditions,
-                'b d -> (repeat b) d', repeat=n_samples,
-            )
-
-            ## [ n_samples x horizon x (action_dim + observation_dim) ]
-            samples = self.ema_model(conditions)
-            trajectories = to_np(samples.trajectories)
-
-            ## [ n_samples x horizon x observation_dim ]
-            normed_observations = trajectories[:, :, self.dataset.action_dim:]
-
-            # [ 1 x 1 x observation_dim ]
-            normed_conditions = to_np(batch.conditions[0])[:,None]
-
-            ## [ n_samples x (horizon + 1) x observation_dim ]
-            normed_observations = np.concatenate([
-                np.repeat(normed_conditions, n_samples, axis=0),
-                normed_observations
-            ], axis=1)
-
-            ## [ n_samples x (horizon + 1) x observation_dim ]
-            observations = self.dataset.normalizer.unnormalize(normed_observations, 'observations')
-
-            savepath = os.path.join(self.logdir, f'sample-{self.step}-{i}.png')
-            self.renderer.composite(savepath, observations)

@@ -17,7 +17,7 @@ Sample = namedtuple('Sample', 'trajectories values chains')
 
 
 @torch.no_grad()
-def default_sample_fn(model, x, cond, t):
+def default_sample_fn(model, x, cond, t): # this sample fn dont use cond (depend on the unet)
     model_mean, _, model_log_variance = model.p_mean_variance(x=x, cond=cond, t=t)
     model_std = torch.exp(0.5 * model_log_variance)
 
@@ -144,7 +144,7 @@ class GaussianDiffusion(nn.Module):
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
     def p_mean_variance(self, x, cond, t):
-        x_recon = self.predict_start_from_noise(x, t=t, noise=self.model(x, cond, t))
+        x_recon = self.predict_start_from_noise(x, t=t, noise=self.model(x, cond, t)) # [ ] Unet dont use 'cond'
 
         if self.clip_denoised:
             x_recon.clamp_(-1., 1.)
@@ -188,7 +188,7 @@ class GaussianDiffusion(nn.Module):
         device = self.betas.device
         batch_size = len(cond[0])
         horizon = horizon or self.horizon
-        shape = (batch_size, horizon, self.transition_dim)
+        shape = (batch_size, horizon, self.transition_dim) # trans_dim = act_dim + obs_dim
 
         return self.p_sample_loop(shape, cond, **sample_kwargs)
 
@@ -228,8 +228,8 @@ class GaussianDiffusion(nn.Module):
         t = torch.randint(0, self.n_timesteps, (batch_size,), device=x.device).long()
         return self.p_losses(x, *args, t)
 
-    def forward(self, cond, *args, **kwargs):
-        return self.conditional_sample(cond, *args, **kwargs)
+    def forward(self, cond, *args, **kwargs): # not used in training
+        return self.conditional_sample(cond, *args, **kwargs) # args -> horizon, return -> Sample(<denoised traj>, <some? value>, <trajs chain>); kwargs -> verbose=True, return_chain=False, sample_fn=default_sample_fn, **sample_kwargs(-> sample_fn(**))
 
 
 class ValueDiffusion(GaussianDiffusion):

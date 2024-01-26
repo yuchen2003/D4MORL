@@ -40,6 +40,8 @@ do
     wait
 done
 
-CUDA_VISIBLE_DEVICES=0 python experiment.py --dir "experiment_runs/cql_impl" --env MO-Ant-v2 --data_mode _formal --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --mo_rtg True --seed 201 --dataset expert_uniform --model_type cql --num_steps_per_iter 10000 --max_iters 20 --conservative_q 3 --granularity 50 --K 5 &
-CUDA_VISIBLE_DEVICES=0 python experiment.py --dir "experiment_runs/cql_impl" --env MO-Ant-v2 --data_mode _formal --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --mo_rtg True --seed 200 --dataset expert_uniform --model_type cql --num_steps_per_iter 20000 --max_iters 20 --conservative_q 1 --granularity 50 --K 5 &
+CUDA_VISIBLE_DEVICES=0 python experiment.py --dir "experiment_runs/cql_impl" --env MO-Ant-v2 --data_mode _formal --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --mo_rtg True --seed 303 --dataset expert_uniform --model_type cql --num_steps_per_iter 20000 --max_iters 20 --conservative_q 3 --granularity 50 --K 5 &
+CUDA_VISIBLE_DEVICES=1 python experiment.py --dir "experiment_runs/cql_impl" --env MO-Ant-v2 --data_mode _formal --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --mo_rtg True --seed 301 --dataset expert_uniform --model_type cql --num_steps_per_iter 20000 --max_iters 20 --conservative_q 1 --granularity 50 --K 5 &
 wait
+
+CUDA_VISIBLE_DEVICES=0 python experiment.py --dir "experiment_runs/non-uni" --env MO-Ant-v2 --num_traj 1000 --data_mode _formal --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --mo_rtg True --seed 1 --dataset expert_custom --model_type bc --num_steps_per_iter 10000 --max_iters 20 --granularity 50

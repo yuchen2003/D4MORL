@@ -14,14 +14,14 @@ class EvaluatorBC(Evaluator):
             init_target_pref = deepcopy(target_pref)
             state_mean = torch.from_numpy(self.state_mean).to(device=self.device, dtype=torch.float32)
             state_std = torch.from_numpy(self.state_std).to(device=self.device, dtype=torch.float32)
-
+            
             seed = np.random.randint(0, 10000)
             self.eval_env.seed(seed) # fixed seeding in evaluation to visualize
+            
             state_np = self.eval_env.reset()
             state_np = np.concatenate((state_np, np.tile(init_target_pref, self.concat_state_pref)), axis=0)
             state_tensor = torch.from_numpy(state_np).to(device=self.device, dtype=torch.float32).reshape(1, self.state_dim)
             state_tensor = torch.clip((state_tensor - state_mean) / state_std, -10, 10)
-
             states = state_tensor
             actions = []
                 

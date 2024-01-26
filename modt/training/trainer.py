@@ -53,10 +53,15 @@ class Trainer:
         self.use_p_bar = use_p_bar
 
     def train_iteration(self, ep):
+        cur_step = (ep+1) * self.n_steps_per_iter
+        log_file_name = f'{self.logsdir}/step={cur_step}.txt'
+        with open(log_file_name, 'w') as f:
+            f.write("\n")
+            
         is_cql = False
         if type(self.model) is CQLModel:
             is_cql = True
-            # print("[CQL loss contains qf_loss, policy_loss, alpha_loss, alpha_Value]")
+            # print("[CQL loss contains qf_loss, policy_loss]")
         
         # 1. Training
         train_losses = []
@@ -118,14 +123,16 @@ class Trainer:
         if not self.eval_only:
             cur_step = (ep+1) * self.n_steps_per_iter
             log_file_name = f'{self.logsdir}/step={cur_step}.txt'
-            with open(log_file_name, 'w') as f:
-                f.write(f"\n\n\n------------------> epoch: {ep} <------------------")
+            with open(log_file_name, 'a') as f:
+                s = ''
+                s += f"\n\n\n------------------> epoch: {ep} <------------------"
                 if is_cql:
-                    f.write(f"\nloss = {np.mean(train_losses, axis=1)}") # qf_loss, policy_loss
+                    s += f"\nloss = {np.mean(train_losses, axis=1)}" # qf_loss, policy_loss
                 else:
-                    f.write(f"\nloss = {np.mean(train_losses)}")
+                    s += f"\nloss = {np.mean(train_losses)}"
                 for k in self.diagnostics:
-                    f.write(f"\n{k} = {self.diagnostics[k]}")
+                    s += f"\n{k} = {self.diagnostics[k]}"
+                f.write(s)
             
             logs['time/total'] = time.time() - self.start_time
             logs['time/evaluation'] = time.time() - eval_start

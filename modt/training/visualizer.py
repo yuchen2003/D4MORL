@@ -1,7 +1,7 @@
 from matplotlib import pyplot as plt
 import seaborn as sns
 import numpy as np
-import sys
+import sys, os
 from modt.utils import (
     compute_hypervolume,
     compute_sparsity,
@@ -330,6 +330,8 @@ def visualize(rollout_logs, logsdir, cur_step, only_hv_sp=False, infos={}):
             cur_ax += 1
 
     plt.tick_params(labelcolor="none", top=False, bottom=False, left=False, right=False)
+    if not os.path.exists(logsdir):
+        os.mkdir(logsdir)
     if not only_hv_sp:
         plt.savefig(f"{logsdir}/step={cur_step}_plots.png")
     else:
@@ -344,9 +346,10 @@ def visualize(rollout_logs, logsdir, cur_step, only_hv_sp=False, infos={}):
 
 
 def cal_from_data(
-    datasets=["expert_wide"], env_name="MO-Hopper-v2", num_traj=50000, num_plot=1000
+    datasets=["expert_wide"], env_name="MO-Hopper-v2", num_traj=50000, num_plot=1000, data_path="data_collected"
 ):
-    generation_path = "data_generation/data_collected"
+    assert num_traj >= num_plot
+    generation_path = f"data_generation/{data_path}"
     dataset_paths = [
         f"{generation_path}/{env_name}/{env_name}_{num_traj}_new{d}.pkl"
         for d in datasets
@@ -363,7 +366,7 @@ def cal_from_data(
 
     states, traj_lens, returns, returns_mo, preferences = [], [], [], [], []
 
-    for traj in trajectories:  # TODO may not need so many trajs ?
+    for traj in trajectories:  # just count all trajs
         traj["rewards"] = np.sum(
             np.multiply(traj["raw_rewards"], traj["preference"]), axis=1
         )
@@ -437,7 +440,19 @@ def cal_all():
                 except:
                     print("error.")
 
-
+import argparse
 if __name__ == "__main__":
     # cal_all()
-    cal_from_data(env_name='MO-Ant-v2')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--env_name', type=str, default='MO-Hopper-v2')
+    parser.add_argument('--collect_type', type=str, default="expert")
+    # narrow, wide, uniform, custom
+    parser.add_argument('--preference_type', type=str, default="custom")
+    parser.add_argument('--num_traj', type=int, default=10000)
+    parser.add_argument('--num_plot', type=int, default=1000)
+    parser.add_argument('--data_path', type=str, default="data_collected")
+    parser.add_argument('--p_bar', type=bool, default=False)
+    args = parser.parse_args()
+    
+    dataset = f"{args.collect_type}_{args.preference_type}"
+    cal_from_data(datasets=[dataset], env_name='MO-Ant-v2', num_traj=args.num_traj, num_plot=args.num_plot, data_path=args.data_path)

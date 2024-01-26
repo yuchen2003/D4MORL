@@ -50,7 +50,7 @@ def experiment(
     num_traj = variant['num_traj']
     device = variant['device']
     log_to_wandb = variant['log_to_wandb']
-    model_type = variant['model_type']
+    model_type = variant['model_type'].lower()
     mode = variant['mode']
     concat_state_pref = variant['concat_state_pref']
     concat_rtg_pref = variant['concat_rtg_pref']
@@ -94,6 +94,16 @@ def experiment(
         from modt.training.cql_trainer import CQLTrainer as Trainer
         from modt.evaluation.evaluator_cql import EvaluatorCQL as Evaluator
         from modt.models.cql import CQLModel as Model
+    elif model_type == 'dd':
+        from modd.trainer import DiffuserTrainer as Trainer
+        from modd.evaluator import EvaluatorDD as Evaluator
+        from modd.model import DecisionDiffuser as Model
+        from diffuser import utils
+        class Parser(utils.Parser):
+            config: str = "config.locomotion"
+            savepath: str = "./experiment_runs/dd_save/",
+            horizon: int = K
+        diffuser_args = Parser().parse_args("mo_diffusion")
     else:
         raise ValueError(f"Unrecognized model: {model_type}")
     
@@ -141,13 +151,15 @@ def experiment(
     for traj in trajectories:
         if concat_state_pref != 0:
             traj['observations'] = np.concatenate((traj['observations'], np.tile(traj['preference'], concat_state_pref)), axis=1)
-            if model_type in ['cql']:
-                traj['next_observations'] = np.concatenate((traj['next_observations'], np.tile(traj['preference'], concat_state_pref)), axis=1)
             
         if normalize_reward:
             traj['raw_rewards'] = (traj['raw_rewards'] - min_each_obj_step) / (max_each_obj_step - min_each_obj_step)
         
+        if model_type in ['cql']:
+            traj['next_observations'] = np.concatenate((traj['next_observations'], np.tile(traj['preference'], concat_state_pref)), axis=1)
+            
         traj['rewards'] = np.sum(np.multiply(traj['raw_rewards'], traj['preference']), axis=1)
+            
         states.append(traj['observations'])
         traj_lens.append(len(traj['observations']))
         returns.append(traj['rewards'].sum())
@@ -173,7 +185,7 @@ def experiment(
         preferences = preferences[indices_wanted, :]
         
 
-    states = np.concatenate(states, axis=0) # [ ] mem-costly (but will release soon)
+    states = np.concatenate(states, axis=0)
     state_mean = state_norm_params[env_name]["mean"]
     state_std = np.sqrt(state_norm_params[env_name]["var"])
     state_mean = np.concatenate((state_mean, np.zeros(concat_state_pref * pref_dim)))
@@ -192,7 +204,8 @@ def experiment(
     min_prefs = np.min(preferences, axis=0)
     if concat_act_pref == 0 and concat_rtg_pref == 0 and concat_state_pref == 0 and model_type == "bc":
         granularity = 1
-    prefs = pref_grid(pref_dim, granularity=granularity) # [?] use min/max_prefs ?
+    prefs = pref_grid(pref_dim, granularity=granularity)
+    
     print('=' * 50)
     print(f'Starting new experiment: {model_type} {env_name} {"+".join(dataset)}')
     print(f'{len(traj_lens)} trajectories, {sum(traj_lens)} timesteps found, all trajectories are padded to length {traj_max_len}.')
@@ -325,6 +338,27 @@ def experiment(
             concat_state_pref=concat_state_pref,
             warmup_steps=warmup_steps,
         ).to(device=device)
+    elif model_type == 'dd':
+        model = Model( # should not concat anything in advance
+            state_dim=state_dim,
+            act_dim=act_dim,
+            pref_dim=pref_dim,
+            hidden_size=variant['embed_dim'],
+            max_length=K,
+            eval_context_length=eval_context_length,
+            max_ep_len=max_ep_len,
+            act_scale=torch.from_numpy(np.array(env.action_space.high)),
+            use_pref=variant['use_pref_predict_action'],
+            concat_state_pref=concat_state_pref,
+            concat_act_pref=concat_act_pref,
+            n_layer=variant['n_layer'],
+            n_head=variant['n_head'],
+            n_inner=4*variant['embed_dim'],
+            n_positions=1024,
+            resid_pdrop=variant['dropout'],
+            attn_pdrop=variant['dropout'],
+            diffuser_args=diffuser_args,
+        )
         
     if model_type != "cql":
         optimizer = Optimizer(
@@ -368,7 +402,7 @@ def experiment(
     min_raw_r = np.multiply(np.min(returns_mo, axis=0), min_prefs)
     max_final_r = np.max(returns)
     min_final_r = np.min(returns)
-
+    
     trainer = Trainer(
         model=model,
         optimizer=optimizer,
@@ -426,7 +460,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--env', type=str, default='MO-Hopper-v2')
     parser.add_argument('--dataset', type=str, nargs='+', default=['expert_uniform'])
-    parser.add_argument('--num_traj', type=int, default=50000)
+    parser.add_argument('--num_traj', type=int, default=10000)
     parser.add_argument('--data_mode', type=str, default='_formal')
     parser.add_argument('--ckpt', type=str, default='')
     parser.add_argument('--mode', type=str, default='normal')  # normal for standard setting, delayed for sparse
@@ -434,7 +468,7 @@ if __name__ == '__main__':
     parser.add_argument('--pct_traj', type=float, default=1.)
     parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--model_type', type=str, default='dt')  # dt, bc, rvs, cql
-    parser.add_argument('--embed_dim', type=int, default=512)
+    parser.add_argument('--embed_dim', type=int, default=256)
     parser.add_argument('--n_layer', type=int, default=3) # lamb's default should be 4
     parser.add_argument('--n_head', type=int, default=1) # lamb's default should be 4
     parser.add_argument('--activation_function', type=str, default='relu')

@@ -13,8 +13,8 @@ class ActTrainer(Trainer):
         action_preds = self.model.forward(states)
 
         act_dim = self.get_batch.act_dim
-        action_preds = action_preds.reshape(-1, act_dim)
-        action_target = action_target[:,-1].reshape(-1, act_dim)
+        action_preds = action_preds.reshape(-1, act_dim) # TODO refer: (bs, act_dim)
+        action_target = action_target[:,-1].reshape(-1, act_dim) # TODO refer: use the last
 
         # only action loss 
         loss = self.loss_fn(

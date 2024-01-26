@@ -7,8 +7,8 @@ from torch.nn import functional as F
 from typing import Dict, Union, Tuple
 from copy import deepcopy
 from collections import defaultdict
-# from policies import BasePolicy
-# from dynamics import BaseDynamics
+from policies import BasePolicy
+from dynamics import BaseDynamics
 
 
 class MOBILEPolicy(nn.Module):

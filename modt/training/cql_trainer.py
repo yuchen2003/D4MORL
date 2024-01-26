@@ -67,7 +67,17 @@ class CQLTrainer(Trainer):
         # rewards = rewards.squeeze(-1) # mean|sum|max|last over contiguous states in trajs
         
         # Network updating
-        # 1. Critic
+        act_shape = actions.shape
+        single_act_shape = (actions.shape[0], 1, actions.shape[-1])
+        # 1. Actor
+        pred_actions, log_pi, _ = self.policy.sample(states)
+        qf1_pi, qf2_pi = self.critic(states, pred_actions)
+        min_qf_pi = torch.min(qf1_pi, qf2_pi)
+        policy_loss = ((self.alpha * log_pi) - min_qf_pi).mean() # [?]
+        
+        # 2. Critic
+        qf1, qf2 = self.critic(states, actions)
+        
         with torch.no_grad():
             next_actions, next_state_log_pis, _ = self.policy.sample(
                 next_states
@@ -79,9 +89,10 @@ class CQLTrainer(Trainer):
                 torch.min(qf1_next_targets, qf2_next_targets)
                 - self.alpha * next_state_log_pis
             )
-            next_q_value = (rewards) + self.gamma * (1 - dones) * min_qf_next_target # target Q
-            next_q_value = torch.clamp(next_q_value, 0, None).mean(dim=-1, keepdim=True) # mean|min|max|last
-        qf1, qf2 = self.critic(states, actions)
+            next_q_value = rewards[:, -1, :] + self.gamma * (1. - dones[:, -1, :]) * self.gamma * min_qf_next_target # target Q
+        
+        # next_q_value = torch.clamp(next_q_value, -10, None)
+        
         qf1_loss = F.mse_loss(qf1, next_q_value)
         qf2_loss = F.mse_loss(qf2, next_q_value)
         
@@ -132,7 +143,7 @@ class CQLTrainer(Trainer):
                         cql_next_log_pis[..., k],
                         _,
                     ) = self.policy.sample(next_states)
-            q_shape = qf1.shape
+            q_shape = qf1.shape # bs, 1
             cql_q1_rand = qf1.new_empty((*q_shape, SP_act))
             cql_q2_rand = qf2.new_empty((*q_shape, SP_act))
             cql_q1_current = qf1.new_empty((*q_shape, SP_act))
@@ -151,17 +162,17 @@ class CQLTrainer(Trainer):
                     states, cql_next_actions[..., k]
                 )
 
-            if consQ == 2: # -> cql_cat_q<1,2>
-                cql_cat_q1 = torch.cat(
-                    [cql_q1_rand, torch.unsqueeze(qf1, -1), cql_q1_next, cql_q1_current],
-                    dim=-1,
-                )
-                cql_cat_q2 = torch.cat(
-                    [cql_q2_rand, torch.unsqueeze(qf2, -1), cql_q2_next, cql_q2_current],
-                    dim=-1,
-                )
-            elif consQ == 3:
-                random_density = self.action_space.shape[0] * np.log(0.5)
+            # -> cql_cat_q<1,2>
+            cql_cat_q1 = torch.cat(
+                [cql_q1_rand, torch.unsqueeze(qf1, -1), cql_q1_next, cql_q1_current],
+                dim=-1,
+            )
+            cql_cat_q2 = torch.cat(
+                [cql_q2_rand, torch.unsqueeze(qf2, -1), cql_q2_next, cql_q2_current],
+                dim=-1,
+            )
+            if consQ == 3:
+                random_density = np.log(0.5 ** self.action_space.shape[0])
                 cql_cat_q1 = torch.cat(
                     [
                         cql_q1_rand - random_density,
@@ -198,29 +209,23 @@ class CQLTrainer(Trainer):
             raise ValueError('invalid conservative Q.')
         
         # 1.2. update
-        self.critic_optim.zero_grad()
-        qf_loss.backward()
-        self.critic_optim.step()
-        
-        # 2. Actor
-        pi, log_pi, _ = self.policy.sample(states)
-        qf1_pi, qf2_pi = self.critic(states, pi)
-        min_qf_pi = torch.min(qf1_pi, qf2_pi)
-        policy_loss = ((self.alpha * log_pi) - min_qf_pi).mean()
-        # print(f"log_pi = {log_pi.mean().cpu()}")
         self.policy_optim.zero_grad()
         policy_loss.backward()
         self.policy_optim.step()
+        
+        self.critic_optim.zero_grad()
+        qf_loss.backward()
+        self.critic_optim.step()
         
         # 3. Target Critic
         soft_update(self.critic_target, self.critic, self.tau)
         
         # 4. Scheduler
-        self.critic_sched.step()
-        self.policy_sched.step()
+        # self.critic_sched.step()
+        # self.policy_sched.step()
         
-        if self.step % 1000 == 0:
-            print(f'qf_loss:{qf_loss}, policy_loss:{policy_loss}')
+        if self.step % 10000 == 0:
+            print(f'qf_loss:{qf_loss.item()}, policy_loss:{policy_loss.item()}')
         self.step += 1
         
         return qf_loss.item(), policy_loss.item()

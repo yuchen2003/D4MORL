@@ -1,5 +1,3 @@
-from shutil import ExecError
-from turtle import numinput
 import numpy as np
 import torch
 import torch.nn as nn
@@ -11,12 +9,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal
 import numpy as np
-import random
-import itertools
 import wandb
 
-LOG_SIG_MAX = 2
-LOG_SIG_MIN = -20
+LOG_SIG_MAX = 2.0
+LOG_SIG_MIN = -20.0
 epsilon = 1e-6
 # *** code is modified from DMBP (DMBP: Diffusion model based predictor for robust offline reinforcement learning against state observation perturbations. (2023).) ***
 
@@ -31,8 +27,8 @@ CQL_config = {
     "iter_repeat_sampling": True,
     "gamma": 0.99,
     "tau": 0.005,
-    "q_lr": 3e-5,
-    "policy_lr": 3e-5,
+    "q_lr": 3e-4,
+    "policy_lr": 3e-4,
     "alpha": 0.2,
     "target_update_interval": 1,
     "normalize": True,
@@ -74,16 +70,13 @@ class QNetwork(
     def __init__(
         self, num_inputs, num_actions, hidden_dim, max_length, dropout, n_layer
     ):
-        """[(SP)A] * max_length -> 1"""
+        """ [(SP)A] -> 1, just input the last transition"""
         super(QNetwork, self).__init__()
         self.max_length = max_length
-        self.num_outputs = max_length
+        self.num_outputs = 1
 
         # Q1 architecture
-        # self.linear1 = nn.Linear(num_inputs + num_actions, hidden_dim)
-        # self.linear2 = nn.Linear(hidden_dim, hidden_dim)
-        # self.linear3 = nn.Linear(hidden_dim, 1)
-        q1_layers = [nn.Linear(max_length * (num_inputs + num_actions), hidden_dim)]
+        q1_layers = [nn.Linear(num_inputs + num_actions, hidden_dim)]
         for _ in range(n_layer - 1):
             q1_layers.extend(
                 [nn.ReLU(), nn.Dropout(dropout), nn.Linear(hidden_dim, hidden_dim)]
@@ -93,15 +86,13 @@ class QNetwork(
                 nn.ReLU(),
                 nn.Dropout(dropout),
                 nn.Linear(hidden_dim, self.num_outputs),
+                nn.Tanh(),
             ]
         )
         self.q1_model = nn.Sequential(*q1_layers)
 
         # Q2 architecture
-        # self.linear4 = nn.Linear(num_inputs + num_actions, hidden_dim)
-        # self.linear5 = nn.Linear(hidden_dim, hidden_dim)
-        # self.linear6 = nn.Linear(hidden_dim, 1)
-        q2_layers = [nn.Linear(max_length * (num_inputs + num_actions), hidden_dim)]
+        q2_layers = [nn.Linear(num_inputs + num_actions, hidden_dim)]
         for _ in range(n_layer - 1):
             q2_layers.extend(
                 [nn.ReLU(), nn.Dropout(dropout), nn.Linear(hidden_dim, hidden_dim)]
@@ -111,6 +102,7 @@ class QNetwork(
                 nn.ReLU(),
                 nn.Dropout(dropout),
                 nn.Linear(hidden_dim, self.num_outputs),
+                nn.Tanh(),
             ]
         )
         self.q2_model = nn.Sequential(*q2_layers)
@@ -118,19 +110,17 @@ class QNetwork(
         self.apply(weights_init_)
 
     def forward(self, states, actions):  # TODO may modify the input here
-        # Network input is [ [State + Preference + Act ] * max_length ]
-        xu = torch.cat([states, actions], dim=-1) # (bs, maxlen, in_dim + act_dim)
+        if len(actions.shape) == 2:
+            actions = actions.unsqueeze(1)
+
+        # Network input is [ [State + Preference + Act ] * max_length ], output is Q(s_t, a_t, omega)
+        state = states[:, [-1], :]
+        action = actions[:, [-1], :]
+        xu = torch.cat([state, action], dim=-1) # (bs, 1, in_dim + act_dim)
         xu = xu.reshape(states.shape[0], -1)
 
-        # x1 = F.relu(self.linear1(xu))
-        # x1 = F.relu(self.linear2(x1))
-        # x1 = self.linear3(x1)
-        x1 = self.q1_model(xu).unsqueeze(-1)
-
-        # x2 = F.relu(self.linear4(xu))
-        # x2 = F.relu(self.linear5(x2))
-        # x2 = self.linear6(x2)
-        x2 = self.q2_model(xu).unsqueeze(-1)
+        x1 = self.q1_model(xu)
+        x2 = self.q2_model(xu)
 
         return x1, x2
 
@@ -149,12 +139,9 @@ class GaussianPolicy(
         action_space=None,
     ):
         super(GaussianPolicy, self).__init__()
-
-        # self.linear1 = nn.Linear(num_inputs, hidden_dim)
-        # self.linear2 = nn.Linear(hidden_dim, hidden_dim)
         self.max_length = max_length
         self.num_actions = num_actions
-        self.num_outputs = max_length * num_actions
+        self.num_outputs = num_actions
         enc_layers = [nn.Linear(max_length * num_inputs, hidden_dim)]
         for _ in range(n_layer - 1):
             enc_layers.extend(
@@ -162,8 +149,16 @@ class GaussianPolicy(
             )
         self.enc = nn.Sequential(*enc_layers)  # encoder: SP * len -> hidden_dim
 
-        self.mean_linear = nn.Linear(hidden_dim, self.num_outputs)
-        self.log_std_linear = nn.Linear(hidden_dim, self.num_outputs)
+        self.mean_linear = nn.Sequential(
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, self.num_outputs),
+        )
+        self.log_std_linear = nn.Sequential(
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, self.num_outputs),
+        )
 
         self.apply(weights_init_)
 
@@ -183,12 +178,9 @@ class GaussianPolicy(
         states = states[:, -self.max_length :].reshape(
             states.shape[0], -1
         )  # (bs, maxlen * state_dim)
-        
-        # x = F.relu(self.linear1(state))
-        # x = F.relu(self.linear2(x))
         x = self.enc(states)
-        mean = self.mean_linear(x).reshape(-1, self.max_length, self.num_actions)
-        log_std = self.log_std_linear(x).reshape(-1, self.max_length, self.num_actions)
+        mean = self.mean_linear(x)
+        log_std = self.log_std_linear(x)
         log_std = torch.clamp(log_std, min=LOG_SIG_MIN, max=LOG_SIG_MAX)
         return mean, log_std
 
@@ -203,8 +195,8 @@ class GaussianPolicy(
         log_prob = normal.log_prob(x_t)
         # Enforcing Action Bound
         log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + epsilon)
-        log_prob = log_prob.sum(1, keepdim=True)
-        mean = torch.tanh(mean.reshape(-1, self.max_length, self.num_actions)) * self.action_scale + self.action_bias
+        log_prob = log_prob.sum(-1, keepdim=True)
+        mean = torch.tanh(mean) * self.action_scale + self.action_bias
         return action, log_prob, mean
 
     def to(self, device):
@@ -231,7 +223,7 @@ class DeterministicPolicy(
         # self.linear2 = nn.Linear(hidden_dim, hidden_dim)
         self.max_length = max_length
         self.num_actions = num_actions
-        self.num_outputs = max_length * num_actions
+        self.num_outputs = num_actions
         enc_layers = [nn.Linear(max_length * num_inputs, hidden_dim)]
         for _ in range(n_layer - 1):
             enc_layers.extend(
@@ -239,7 +231,13 @@ class DeterministicPolicy(
             )
         self.enc = nn.Sequential(*enc_layers)  # encoder: SP * len -> hidden_dim
 
-        self.mean = nn.Linear(hidden_dim, self.num_outputs)
+        # self.mean = nn.Linear(hidden_dim, self.num_outputs)
+        self.mean = nn.Sequential(
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, self.num_outputs),
+            nn.Tanh(),
+        )
         self.noise = torch.Tensor(1, max_length, num_actions)
 
         self.apply(weights_init_)
@@ -260,11 +258,8 @@ class DeterministicPolicy(
         states = states[:, -self.max_length :].reshape(
             states.shape[0], -1
         )  # (bs, maxlen * state_dim)
-        # x = F.relu(self.linear1(state))
-        # x = F.relu(self.linear2(x))
-        
         x = self.enc(states)
-        mean = torch.tanh(self.mean(x).reshape(-1, self.max_length, self.num_actions)) * self.action_scale + self.action_bias
+        mean = self.mean(x) * self.action_scale + self.action_bias
         return mean
 
     def sample(self, states):
@@ -395,21 +390,20 @@ class CQLModel(TrajectoryModel):
                     states, # the last one(s)
                 ],
                 dim=1,
-            )
+            ).to(dtype=torch.float32)
         
         # states_compli = states[:, [-1], :].repeat((1, self.max_length - states.shape[1], 1))
         # states = torch.cat([states_compli, states], dim=1)
         
-        states = states.to(dtype=torch.float32)
-        _, _, actions = self.policy.sample(states)  # -> actions, log_probs, means
-        actions = actions.reshape(states.shape[0], -1, self.act_dim)
-        return actions[0, -1]
+        _, _, action = self.policy.sample(states)  # -> actions, log_probs, means
+        action = action.reshape(states.shape[0], 1, self.act_dim)
+        return action[0, -1]
 
     def forward(self, states):
-        actions, _, _ = self.policy.sample(states)
-        actions = actions.reshape(states.shape[0], -1, self.act_dim)
+        action, _, _ = self.policy.sample(states)
+        action = action.reshape(states.shape[0], 1, self.act_dim) # TODO get ONE action from (bs, maxlen * state_dim) states ? like in bc model:forward. And then the Qf is caled based on a single state-action transition rather than a whole horizon.
 
-        return actions
+        return action
     
     def train(self) -> None:
         self.policy.train()

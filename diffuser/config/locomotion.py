@@ -67,7 +67,7 @@ base = {
         ## model
         'model': 'models.TemporalUnet',
         'diffusion': 'models.GaussianDiffusion',
-        'horizon': 32,
+        # 'horizon': 32,
         'n_diffusion_steps': 20,
         'action_weight': 10,
         'loss_weights': None,
@@ -78,7 +78,7 @@ base = {
         'renderer': 'utils.MuJoCoRenderer',
 
         ## dataset
-        'loader': 'datasets.TrajectoryDataset',
+        # 'loader': 'datasets.TrajectoryDataset',
         'normalizer': 'GaussianNormalizer',
         'preprocess_fns': [],
         'clip_denoised': False,
@@ -89,11 +89,12 @@ base = {
         'logbase': logbase,
         'prefix': 'diffusion/defaults',
         'exp_name': watch(args_to_watch),
+        'savepath': './experiment_runs/dd_save/',
 
         ## training
-        'n_steps_per_epoch': 10000,
         'loss_type': 'l2',
-        'n_train_steps': 1e6,
+        'n_steps_per_epoch': 10000,
+        'n_train_steps': 1e6, # overridded by D4MORL config
         'batch_size': 32,
         'learning_rate': 2e-4,
         'gradient_accumulate_every': 2,

@@ -65,17 +65,21 @@ class Parser(Tap):
         '''
             Load parameters from config file
         '''
-        dataset = args.dataset.replace('-', '_')
-        print(f'[ utils/setup ] Reading config: {args.config}:{dataset}')
         module = importlib.import_module(args.config)
         params = getattr(module, 'base')[experiment]
+        
+        if hasattr(args, "dataset"):
+            dataset = args.dataset.replace('-', '_')
+            print(f'[ utils/setup ] Reading config: {args.config}:{dataset}')
 
-        if hasattr(module, dataset) and experiment in getattr(module, dataset):
-            print(f'[ utils/setup ] Using overrides | config: {args.config} | dataset: {dataset}')
-            overrides = getattr(module, dataset)[experiment]
-            params.update(overrides)
+            if hasattr(module, dataset) and experiment in getattr(module, dataset):
+                print(f'[ utils/setup ] Using overrides | config: {args.config} | dataset: {dataset}')
+                overrides = getattr(module, dataset)[experiment]
+                params.update(overrides)
+            else:
+                print(f'[ utils/setup ] Not using overrides | config: {args.config} | dataset: {dataset}')
         else:
-            print(f'[ utils/setup ] Not using overrides | config: {args.config} | dataset: {dataset}')
+            print("[ utils/setup ] Using D4MORL loader.")
 
         self._dict = {}
         for key, val in params.items():
@@ -97,7 +101,9 @@ class Parser(Tap):
         for i in range(0, len(extras), 2):
             key = extras[i].replace('--', '')
             val = extras[i+1]
-            assert hasattr(args, key), f'[ utils/setup ] {key} not found in config: {args.config}'
+            # assert hasattr(args, key), f'[ utils/setup ] {key} not found in config: {args.config}'
+            if not hasattr(args, key):
+                continue
             old_val = getattr(args, key)
             old_type = type(old_val)
             print(f'[ utils/setup ] Overriding config | {key} : {old_val} --> {val}')
