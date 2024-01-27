@@ -10,10 +10,11 @@ from diffuser.models import GaussianDiffusion
 
 from collections import namedtuple
 
+DESIGNED_MOD_TYPE = ['bc', 'dd', 'dt', 'td']
+
 Sample = namedtuple("Sample", "trajectories values chains")
 
-
-class DecisionDiffuser(TrajectoryModel):
+class MODiffuser(TrajectoryModel):
 
     """
     This model uses Decision Diffuser to model ([state pref] action) * maxlen
@@ -39,6 +40,7 @@ class DecisionDiffuser(TrajectoryModel):
         resid_pdrop,
         attn_pdrop,
         diffuser_args=None,
+        mod_type='bc',
     ):
         super().__init__(state_dim, act_dim, pref_dim, max_length=max_length)
 
@@ -48,6 +50,16 @@ class DecisionDiffuser(TrajectoryModel):
         self.concat_state_pref = concat_state_pref
         self.concat_act_pref = concat_act_pref
         self.eval_context_length = eval_context_length
+        
+        assert mod_type in DESIGNED_MOD_TYPE, f'Should set MO Diffuser type as one of {DESIGNED_MOD_TYPE}'
+        if mod_type == 'bc':
+            self.act_fn = self._bc_get_action
+        elif mod_type == 'dd':
+            self.act_fn = self._dd_get_action
+        elif mod_type == 'dt':
+            self.act_fn = self._dt_get_action
+        elif mod_type == 'td':
+            self.act_fn = self._td_get_action
 
         # //suppose nothing is concated in advance (this means 'concat_<state|act>_pref' has a slightly different semantic)
         # self.state_dim = (
@@ -94,12 +106,27 @@ class DecisionDiffuser(TrajectoryModel):
         # Just for sampling
         return self.diffusion.forward(cond)
 
-    def get_action(self, states, actions, rtg, pref, t): # TODO: add a diffuion step for evaluation (much less than that in training)
+    def get_action(self, states, actions, rtg, pref, t):
         ''' Predict a_t using s_{t-N:t} and a_{t-N:t-1}, as in DMBP (TODO: may need train also like in DMBP, i.e. a non-Markovian loss) '''
         # obtain action from generated traj
-        cond = {0: states} # TODO: to be further modified
-        traj = self.forward(cond).trajectories
-        # [[a, s] * H] * bs <=> (bs, H, a+s)
-        action = traj[0, -1, : self.act_dim]
+        
+        # cond = {0: states} # TODO: to be further modified
+        # traj = self.forward(cond).trajectories
+        # # [[a, s] * H] * bs <=> (bs, H, a+s)
+        # action = traj[0, -1, : self.act_dim]
+        
+        action = self.act_fn(states, actions, rtg, pref, t)
 
         return action
+    
+    def _bc_get_action(self, states, actions, rtg, pref, t):
+        pass
+    
+    def _dd_get_action(self, states, actions, rtg, pref, t):
+        pass
+    
+    def _dt_get_action(self, states, actions, rtg, pref, t):
+        pass
+    
+    def _td_get_action(self, states, actions, rtg, pref, t):
+        pass

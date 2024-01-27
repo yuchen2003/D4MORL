@@ -35,3 +35,19 @@ done
 
 # dd custom
 CUDA_VISIBLE_DEVICES=1 python experiment.py --dir experiment_runs/all_expert_custom --env MO-Swimmer-v2 --data_mode _formal --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --mo_rtg True --seed 1 --dataset expert_custom --model_type dd --num_steps_per_iter 200000 --max_iters 2 --use_p_bar True
+
+# plot
+for ENV in Hopper Ant HalfCheetah Walker2d Swimmer
+do
+    python modt/training/visualizer.py --env_name MO-$ENV-v2 --collect_type expert --preference_type custom --num_traj 10000 --num_plot 1000
+done
+
+python modt/training/visualizer.py --env_name MO-Ant-v2 --collect_type expert --preference_type uniform --num_traj 10000 --num_plot 1000 &
+python modt/training/visualizer.py --env_name MO-HalfCheetah-v2 --collect_type expert --preference_type uniform --num_traj 10000 --num_plot 1000 &
+python modt/training/visualizer.py --env_name MO-Hopper-v2 --collect_type expert --preference_type uniform --num_traj 10000 --num_plot 1000 &
+python modt/training/visualizer.py --env_name MO-Swimmer-v2 --collect_type expert --preference_type uniform --num_traj 10000 --num_plot 1000 &
+python modt/training/visualizer.py --env_name MO-Walker2d-v2 --collect_type expert --preference_type uniform --num_traj 10000 --num_plot 1000 &
+python modt/training/visualizer.py --env_name MO-Hopper-v3 --collect_type expert --preference_type uniform --num_traj 10000 --num_plot 1000 &
+wait
+
+python modt/training/visualizer.py --env_name MO-Hopper-v3 --collect_type expert --preference_type uniform --num_traj 10000 --num_plot 1000

@@ -455,4 +455,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     dataset = f"{args.collect_type}_{args.preference_type}"
-    cal_from_data(datasets=[dataset], env_name='MO-Ant-v2', num_traj=args.num_traj, num_plot=args.num_plot, data_path=args.data_path)
+    cal_from_data(datasets=[dataset], env_name=args.env_name, num_traj=args.num_traj, num_plot=args.num_plot, data_path=args.data_path)

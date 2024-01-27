@@ -5,7 +5,7 @@ from modt.evaluation import Evaluator
 from collections import defaultdict
 
 
-class EvaluatorDD(Evaluator):
+class EvaluatorMOD(Evaluator):
 
     def __call__(self, model, target_return, target_pref, cur_step):
 

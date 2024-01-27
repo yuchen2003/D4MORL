@@ -4,6 +4,7 @@ import time
 from tqdm import tqdm
 from modt.training.visualizer import visualize
 from modt.models.cql import CQLModel
+from modd.model import MODiffuser
 
 class Trainer:
     def __init__(
@@ -59,9 +60,14 @@ class Trainer:
             f.write("\n")
             
         is_cql = False
-        if type(self.model) is CQLModel:
+        is_dd = False # TODO rename all 'dd' to 'mod' (MO Diffuser)
+        if isinstance(self.model, CQLModel):
             is_cql = True
             # print("[CQL loss contains qf_loss, policy_loss]")
+        elif isinstance(self.model, MODiffuser):
+            is_dd = True
+            
+        
         
         # 1. Training
         train_losses = []
@@ -72,7 +78,10 @@ class Trainer:
             print("training: iter =", ep)
             self.model.train()
             for ite in tqdm(range(self.n_steps_per_iter), disable=not self.use_p_bar):
-                train_loss = self.train_step()
+                if is_dd:
+                    train_loss, infos = self.train_step()
+                else:
+                    train_loss = self.train_step()
                 train_losses.append(train_loss)
                 if self.scheduler is not None:
                     self.scheduler.step()
@@ -128,6 +137,8 @@ class Trainer:
                 s += f"\n\n\n------------------> epoch: {ep} <------------------"
                 if is_cql:
                     s += f"\nloss = {np.mean(train_losses, axis=1)}" # qf_loss, policy_loss
+                elif is_dd:
+                    s += f"\nloss = {np.mean(train_losses)}, infos = {infos}"
                 else:
                     s += f"\nloss = {np.mean(train_losses)}"
                 for k in self.diagnostics:

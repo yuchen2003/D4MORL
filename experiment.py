@@ -76,6 +76,11 @@ def experiment(
     use_p_bar = variant['use_p_bar']
     cons_q = variant['conservative_q']
     
+    is_mod = (model_type == 'mod')
+    if is_mod:
+        mod_type = variant['mod_type']
+        granularity = variant['mod_gran']
+    
     # Model, Trainer, Evaluator
     if model_type == 'dt':
         from modt.training.seq_trainer import SequenceTrainer as Trainer
@@ -94,14 +99,14 @@ def experiment(
         from modt.training.cql_trainer import CQLTrainer as Trainer
         from modt.evaluation.evaluator_cql import EvaluatorCQL as Evaluator
         from modt.models.cql import CQLModel as Model
-    elif model_type == 'dd':
-        from modd.trainer import DiffuserTrainer as Trainer
-        from modd.evaluator import EvaluatorDD as Evaluator
-        from modd.model import DecisionDiffuser as Model
+    elif model_type == 'mod':
+        from mod.trainer import DiffuserTrainer as Trainer
+        from mod.evaluator import EvaluatorMOD as Evaluator
+        from mod.model import MODiffuser as Model
         from diffuser import utils
         class Parser(utils.Parser):
             config: str = "config.locomotion"
-            savepath: str = "./experiment_runs/dd_save/",
+            savepath: str = "./experiment_runs/mod_save/",
             horizon: int = K
         diffuser_args = Parser().parse_args("mo_diffusion")
     else:
@@ -338,7 +343,7 @@ def experiment(
             concat_state_pref=concat_state_pref,
             warmup_steps=warmup_steps,
         ).to(device=device)
-    elif model_type == 'dd':
+    elif model_type == 'mod':
         model = Model( # should not concat anything in advance
             state_dim=state_dim,
             act_dim=act_dim,
@@ -358,6 +363,7 @@ def experiment(
             resid_pdrop=variant['dropout'],
             attn_pdrop=variant['dropout'],
             diffuser_args=diffuser_args,
+            mod_type=mod_type,
         )
         
     if model_type != "cql":
@@ -467,7 +473,7 @@ if __name__ == '__main__':
     parser.add_argument('--K', type=int, default=20) # trajectory horizon
     parser.add_argument('--pct_traj', type=float, default=1.)
     parser.add_argument('--batch_size', type=int, default=64)
-    parser.add_argument('--model_type', type=str, default='dt')  # dt, bc, rvs, cql
+    parser.add_argument('--model_type', type=str, default='dt')  # dt, bc, rvs, cql, mod
     parser.add_argument('--embed_dim', type=int, default=256)
     parser.add_argument('--n_layer', type=int, default=3) # lamb's default should be 4
     parser.add_argument('--n_head', type=int, default=1) # lamb's default should be 4
@@ -497,11 +503,14 @@ if __name__ == '__main__':
     parser.add_argument('--optimizer', type=str, default="adam") # adam, lamb
     parser.add_argument('--eval_context_length', type=int, default=5)
     parser.add_argument('--rtg_scale', type=float, default=1)
-    parser.add_argument('--seed', type=int, default=11111)
+    parser.add_argument('--seed', type=int, default=123454321)
     parser.add_argument('--granularity', type=int, default=500) # or 324 for hopper3d
     parser.add_argument('--use_max_rtg', type=bool, default=False)
     parser.add_argument('--use_p_bar', type=bool, default=True)
     parser.add_argument('--conservative_q', type=int, default=3)
+    # MODiffuser configs
+    parser.add_argument('--mod_type', type=str, default='bc') # bc, dt, td, dd
+    parser.add_argument('--mod_eval_gran', type=int, default=50) # for fewer evaluation time
     args = parser.parse_args()
     
     seed = args.seed if args.seed is not None else np.random.randint(0, 100000)

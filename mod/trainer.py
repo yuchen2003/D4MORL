@@ -10,7 +10,7 @@ Batch = namedtuple('Batch', 'trajs, conds')
 class DiffuserTrainer(Trainer):
     def __init__(
         self,
-        model, # DecisionDiffuser model
+        model, # MODiffuser model
         optimizer,
         get_batch,
         loss_fn,
@@ -82,7 +82,7 @@ class DiffuserTrainer(Trainer):
             pref,
         ) = self.get_batch()
         # Prepare training batch
-        as_trajs = torch.cat([actions, states], axis=-1) # TODO: may also use rtg, timessteps, pref, ...
+        as_trajs = torch.cat([actions, states], axis=-1) # TODO may also use rtg, timessteps, pref, ... {the only training setting}
         s_conds = {0: deepcopy(states[:, 0, :])}
         batch = Batch(trajs=as_trajs, conds=s_conds)
         
@@ -94,4 +94,4 @@ class DiffuserTrainer(Trainer):
         # ...
         # print(f"infos: {infos}")
         
-        return loss
+        return loss, infos
