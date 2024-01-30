@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import einops
 from einops.layers.torch import Rearrange
 import pdb
+from collections import namedtuple
 
 import diffuser.utils as utils
 
@@ -145,6 +146,7 @@ def apply_conditioning(x, conditions, action_dim):
         x[:, t, action_dim:] = val.clone()
     return x
 
+Inpaint = namedtuple("InpaintConfig", "traj_start traj_end target")
 
 #-----------------------------------------------------------------------------#
 #---------------------------------- losses -----------------------------------#

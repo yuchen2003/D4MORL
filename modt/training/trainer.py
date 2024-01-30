@@ -4,7 +4,7 @@ import time
 from tqdm import tqdm
 from modt.training.visualizer import visualize
 from modt.models.cql import CQLModel
-from modd.model import MODiffuser
+from mod.model import MODiffuser
 
 class Trainer:
     def __init__(
@@ -60,12 +60,12 @@ class Trainer:
             f.write("\n")
             
         is_cql = False
-        is_dd = False # TODO rename all 'dd' to 'mod' (MO Diffuser)
+        is_mod = False
         if isinstance(self.model, CQLModel):
             is_cql = True
             # print("[CQL loss contains qf_loss, policy_loss]")
         elif isinstance(self.model, MODiffuser):
-            is_dd = True
+            is_mod = True
             
         
         
@@ -78,7 +78,7 @@ class Trainer:
             print("training: iter =", ep)
             self.model.train()
             for ite in tqdm(range(self.n_steps_per_iter), disable=not self.use_p_bar):
-                if is_dd:
+                if is_mod:
                     train_loss, infos = self.train_step()
                 else:
                     train_loss = self.train_step()
@@ -137,7 +137,7 @@ class Trainer:
                 s += f"\n\n\n------------------> epoch: {ep} <------------------"
                 if is_cql:
                     s += f"\nloss = {np.mean(train_losses, axis=1)}" # qf_loss, policy_loss
-                elif is_dd:
+                elif is_mod:
                     s += f"\nloss = {np.mean(train_losses)}, infos = {infos}"
                 else:
                     s += f"\nloss = {np.mean(train_losses)}"

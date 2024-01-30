@@ -10,7 +10,7 @@ Batch = namedtuple('Batch', 'trajs, conds')
 class DiffuserTrainer(Trainer):
     def __init__(
         self,
-        model, # MODiffuser model
+        model,  # MODiffuser model
         optimizer,
         get_batch,
         loss_fn,
@@ -51,7 +51,7 @@ class DiffuserTrainer(Trainer):
             logsdir,
             use_p_bar,
         )
-        
+
         self.args = args = self.model.args
         trainer_config = utils.Config(
             utils.Trainer,
@@ -68,30 +68,53 @@ class DiffuserTrainer(Trainer):
             bucket=args.bucket,
             n_reference=args.n_reference,
         )
-        
+
         self.trainer = trainer_config(model.diffusion)
+        self.diffuser = model # MODiffuser
+
+        self.mod_type = self.model.mod_type
+        if self.mod_type == 'bc':
+            self.batch_fn = self._bc_get_batch
+        elif self.mod_type == 'dd':
+            self.batch_fn = self._dd_get_batch
+        elif self.mod_type == 'dt':
+            self.batch_fn = self._dt_get_batch
+        elif self.mod_type == 'td':
+            self.batch_fn = self._td_get_batch
+            
+        self.infer_N = self.model.infer_N
+        self.cond_M = self.model.cond_M
 
     def train_step(self):
-        (
-            states,
-            actions,
-            raw_return,
-            rtg,
-            timesteps,
-            attention_mask,
-            pref,
-        ) = self.get_batch()
+        s, a, r, g, t, mask, p = self.get_batch()
+        g = g[:, :-1]
+
         # Prepare training batch
-        as_trajs = torch.cat([actions, states], axis=-1) # TODO may also use rtg, timessteps, pref, ... {the only training setting}
-        s_conds = {0: deepcopy(states[:, 0, :])}
-        batch = Batch(trajs=as_trajs, conds=s_conds)
-        
+        batch = self.batch_fn(s, a, r, g, t, mask, p)
+
         # Invoke diffusion trainer
-        # n_train_steps = int(self.args.n_train_steps)
         loss, infos = self.trainer.train(1, batch)
 
         # update logs
         # ...
         # print(f"infos: {infos}")
-        
+
         return loss, infos
+
+    def _bc_get_batch(self, s, a, r, g, t, mask, p):
+        as_trajs = torch.cat([a, s], axis=-1)
+        conds = self.diffuser._make_cond(a, s, None)
+        return Batch(trajs=as_trajs, conds=conds)
+
+    def _dd_get_batch(self, s, a, r, g, t, mask, p):
+        sg_trajs = torch.cat([s, g], axis=-1)
+        conds = self.diffuser._make_cond(None, s, g)
+        return Batch(trajs=sg_trajs, conds=conds)
+
+    def _dt_get_batch(self, s, a, r, g, t, mask, p):
+        asg_trajs = torch.cat([a, s, g], axis=-1)
+        conds = self.diffuser._make_cond(a, s, g)
+        return Batch(trajs=asg_trajs, conds=conds)
+
+    def _td_get_batch(self, s, a, r, g, t, mask, p):
+        pass

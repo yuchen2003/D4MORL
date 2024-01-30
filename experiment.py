@@ -79,7 +79,10 @@ def experiment(
     is_mod = (model_type == 'mod')
     if is_mod:
         mod_type = variant['mod_type']
-        granularity = variant['mod_gran']
+        granularity = variant['mod_eval_gran'] # TODO may modify hyperparam to make eval faster, and then this is not further needed
+        infer_N = variant['infer_N'] # >= 0
+        cond_M = K - infer_N
+        assert cond_M >= 1 # when cond_M == 1, use no traj context (except for current state)
     
     # Model, Trainer, Evaluator
     if model_type == 'dt':
@@ -108,6 +111,8 @@ def experiment(
             config: str = "config.locomotion"
             savepath: str = "./experiment_runs/mod_save/",
             horizon: int = K
+            n_diffusion_steps:int = variant['n_diffusion_steps']
+            
         diffuser_args = Parser().parse_args("mo_diffusion")
     else:
         raise ValueError(f"Unrecognized model: {model_type}")
@@ -209,6 +214,8 @@ def experiment(
     min_prefs = np.min(preferences, axis=0)
     if concat_act_pref == 0 and concat_rtg_pref == 0 and concat_state_pref == 0 and model_type == "bc":
         granularity = 1
+    if env_name == 'MO-Hopper-v3':
+        granularity = 50
     prefs = pref_grid(pref_dim, granularity=granularity)
     
     print('=' * 50)
@@ -326,7 +333,7 @@ def experiment(
             reward_conditioning=True,
             env_name=env_name,
         ).to(device=device)
-        model.state_dim = state_dim # [?] redundant ?
+        model.state_dim = state_dim
         model.act_dim = act_dim
         model.pref_dim = pref_dim
         model.rtg_dim = rtg_dim
@@ -356,6 +363,7 @@ def experiment(
             use_pref=variant['use_pref_predict_action'],
             concat_state_pref=concat_state_pref,
             concat_act_pref=concat_act_pref,
+            concat_rtg_pref=concat_rtg_pref,
             n_layer=variant['n_layer'],
             n_head=variant['n_head'],
             n_inner=4*variant['embed_dim'],
@@ -364,9 +372,12 @@ def experiment(
             attn_pdrop=variant['dropout'],
             diffuser_args=diffuser_args,
             mod_type=mod_type,
+            infer_N=infer_N,
+            cond_M=cond_M,
+            batch_size=batch_size,
         )
         
-    if model_type != "cql":
+    if model_type not in ['cql', 'mod']:
         optimizer = Optimizer(
             model.parameters(),
             lr=variant['learning_rate'],
@@ -447,7 +458,7 @@ def experiment(
         
         # save model
         filename = f'{ckptdir}/step={step}.ckpt'
-        if model_type == "cql":
+        if model_type in ['cql', 'mod']:
             model.save_model(filename)
         else:
             torch.save({
@@ -509,8 +520,10 @@ if __name__ == '__main__':
     parser.add_argument('--use_p_bar', type=bool, default=True)
     parser.add_argument('--conservative_q', type=int, default=3)
     # MODiffuser configs
-    parser.add_argument('--mod_type', type=str, default='bc') # bc, dt, td, dd
+    parser.add_argument('--mod_type', type=str, default='bc') # bc, dd, dt, td
     parser.add_argument('--mod_eval_gran', type=int, default=50) # for fewer evaluation time
+    parser.add_argument('--infer_N', type=int, default=0) # traj_gen = tau_{t-M+1:t} (M cond) ## tau_{t+1:t+N} (N infer); notice a_hat = a_t
+    parser.add_argument('--n_diffusion_steps', type=int, default=20)
     args = parser.parse_args()
     
     seed = args.seed if args.seed is not None else np.random.randint(0, 100000)
@@ -518,14 +531,13 @@ if __name__ == '__main__':
     
     dataset_name = '+'.join(args.dataset)
     
-    # args.run_name = f"{args.dir}/{args.env}/{dataset_name}/K={args.K}/mo_rtg={args.mo_rtg}/rtg_scale={int(args.rtg_scale * 100)}/norm_rew={args.normalize_reward}/concat_state_pref={args.concat_state_pref}/concat_rtg_pref={args.concat_rtg_pref}/concat_act_pref={args.concat_act_pref}/percent={args.percent_dt}/batch={args.batch_size}/dim={args.embed_dim}/layers={args.n_layer}/obj={args.use_obj}/use_pref={args.use_pref_predict_action}/return_loss={args.return_loss}/pref_loss={args.pref_loss}/optim={args.optimizer}/seed={seed}"
-    
     if args.concat_state_pref + args.concat_act_pref + args.concat_rtg_pref == 0:
         typ = 'naive'
     else:
         typ = 'normal'
+    if args.model_type == 'mod':
+        args.model_type += f'/{args.mod_type}'
     args.run_name = f"{args.dir}/{args.model_type}/{typ}/{args.env}/{dataset_name}/{args.seed}"
-    
         
     if not os.path.exists(args.run_name):
         os.makedirs(args.run_name)

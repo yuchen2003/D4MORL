@@ -73,7 +73,7 @@ class CQLTrainer(Trainer):
         pred_actions, log_pi, _ = self.policy.sample(states)
         qf1_pi, qf2_pi = self.critic(states, pred_actions)
         min_qf_pi = torch.min(qf1_pi, qf2_pi)
-        policy_loss = ((self.alpha * log_pi) - min_qf_pi).mean() # [?]
+        policy_loss = ((self.alpha * log_pi) - min_qf_pi).mean()
         
         # 2. Critic
         qf1, qf2 = self.critic(states, actions)

@@ -60,4 +60,4 @@ do
 done
 
 # python experiment.py --dir experiment_runs/uniform --env MO-Hopper-v2 --num_traj 123 --data_mode _formal --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --mo_rtg True --seed 1 --dataset expert_wide --model_type dt --num_steps_per_iter 100000 --max_iters 2
-# python experiment.py --dir experiment_runs/debug --env MO-Ant-v2 --num_traj 50000 --data_mode _formal --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --mo_rtg True --seed 2 --dataset expert_wide --model_type cql --num_steps_per_iter 10000 --max_iters 2
+python experiment.py --dir experiment_runs/all_expert_uniform --env MO-HalfCheetah-v2 --data_mode _formal --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --mo_rtg True --seed 1 --dataset expert_uniform --model_type dt --num_steps_per_iter 40000 --max_iters 2

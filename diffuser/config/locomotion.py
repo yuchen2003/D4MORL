@@ -66,9 +66,9 @@ base = {
     'mo_diffusion': {
         ## model
         'model': 'models.TemporalUnet',
-        'diffusion': 'models.GaussianDiffusion',
+        'diffusion': 'models.MOGaussianDiffusion',
         # 'horizon': 32,
-        'n_diffusion_steps': 20,
+        # 'n_diffusion_steps': 20,
         'action_weight': 10,
         'loss_weights': None,
         'loss_discount': 1,
@@ -89,7 +89,7 @@ base = {
         'logbase': logbase,
         'prefix': 'diffusion/defaults',
         'exp_name': watch(args_to_watch),
-        'savepath': './experiment_runs/dd_save/',
+        'savepath': './experiment_runs/mod_save/',
 
         ## training
         'loss_type': 'l2',

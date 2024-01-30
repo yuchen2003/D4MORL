@@ -401,7 +401,7 @@ class CQLModel(TrajectoryModel):
 
     def forward(self, states):
         action, _, _ = self.policy.sample(states)
-        action = action.reshape(states.shape[0], 1, self.act_dim) # TODO get ONE action from (bs, maxlen * state_dim) states ? like in bc model:forward. And then the Qf is caled based on a single state-action transition rather than a whole horizon.
+        action = action.reshape(states.shape[0], 1, self.act_dim)
 
         return action
     
