@@ -89,7 +89,6 @@ base = {
         'logbase': logbase,
         'prefix': 'diffusion/defaults',
         'exp_name': watch(args_to_watch),
-        'savepath': './experiment_runs/mod_save/',
 
         ## training
         'loss_type': 'l2',

@@ -6,12 +6,11 @@ import torch.nn as nn
 import transformers
 from modt.models.model import TrajectoryModel
 from diffuser import utils
-from diffuser.models import GaussianDiffusion
 from diffuser.models import Inpaint
 
 from collections import namedtuple
 
-DESIGNED_MOD_TYPE = ['bc', 'dd', 'dt', 'td']
+DESIGNED_MOD_TYPE = ['bc', 'dd', 'dt']
 
 Sample = namedtuple("Sample", "trajectories values chains")
 
@@ -36,7 +35,7 @@ class MODiffuser(TrajectoryModel):
         concat_state_pref,
         concat_act_pref,
         concat_rtg_pref,
-        n_layer,
+        n_layer, # TODO simplify these
         n_head,
         n_inner,
         n_positions,
@@ -47,6 +46,8 @@ class MODiffuser(TrajectoryModel):
         infer_N=1,
         cond_M=0,
         batch_size=64,
+        returns_condition=False,
+        verbose=False,
     ):
         super().__init__(state_dim, act_dim, pref_dim, max_length=max_length)
 
@@ -56,28 +57,30 @@ class MODiffuser(TrajectoryModel):
         self.concat_state_pref = concat_state_pref
         self.concat_act_pref = concat_act_pref
         self.eval_context_length = eval_context_length
+        self.verbose = verbose
 
         # //suppose nothing is concated in advance (this means 'concat_<state|act>_pref' has a slightly different semantic)
         # self.state_dim = (
         #     state_dim + concat_state_pref * pref_dim
         # )  # already done in experiment.py
+        self.state_dim = state_dim
         self.act_dim = act_dim + concat_act_pref * pref_dim   # TODO need concat a, p
         self.rtg_dim = pref_dim + concat_rtg_pref * pref_dim  # TODO need concat g, p
 
         assert mod_type in DESIGNED_MOD_TYPE, f'Should set MO Diffuser type as one of {DESIGNED_MOD_TYPE}'
+        self.ar_inv = False
         self.mod_type = mod_type
         if self.mod_type == 'bc':
             self.act_fn = self._bc_get_action
             trans_dim = self.act_dim + self.state_dim # a, s (merely s may lead to low perf)
+            # self.ar_inv = True
         elif self.mod_type == 'dd':
             self.act_fn = self._dd_get_action
             trans_dim = self.state_dim + self.rtg_dim  # s, g (a from InvDyn)
+            self.ar_inv = True
         elif self.mod_type == 'dt':
             self.act_fn = self._dt_get_action
             trans_dim = self.act_dim + self.state_dim + self.rtg_dim  # a, s, g
-        elif self.mod_type == 'td':
-            # self.act_fn = self._td_get_action # TODO need more implementation
-            trans_dim = self.act_dim + self.state_dim + self.rtg_dim  # a, s, g (synthesis trajs)
 
         assert infer_N + cond_M == max_length
         self.infer_N = infer_N
@@ -88,24 +91,28 @@ class MODiffuser(TrajectoryModel):
         self.args = args = diffuser_args
         model_config = utils.Config(
             args.model,
-            savepath=(args.savepath, "model_config.pkl"),
+            savepath=(args.savepath, "model_config"),
             horizon=max_length,
             transition_dim=trans_dim,
             dim=max_length,
             cond_dim=0,  # not used in TemporalUnet and ValueUnet
+            rtg_dim=self.rtg_dim,
             dim_mults=args.dim_mults,
             attention=args.attention,
             device=args.device,
+            returns_condition=returns_condition,
         )  # Unet
 
         diffusion_config = utils.Config(
             args.diffusion,
-            savepath=(args.savepath, "diffusion_config.pkl"),
+            savepath=(args.savepath, "diffusion_config"),
             horizon=args.horizon,
             observation_dim=state_dim,
             action_dim=act_dim,
             pref_dim=pref_dim,
             trans_dim=trans_dim,
+            hidden_dim=hidden_size,
+            mod_type=mod_type,
             n_timesteps=args.n_diffusion_steps,
             loss_type=args.loss_type,
             clip_denoised=args.clip_denoised,
@@ -114,6 +121,9 @@ class MODiffuser(TrajectoryModel):
             action_weight=args.action_weight,
             loss_weights=args.loss_weights,
             loss_discount=args.loss_discount,
+            returns_condition=returns_condition,
+            condition_guidance_w=0.1,
+            ar_inv=self.ar_inv,
             device=args.device,
         )
 
@@ -121,15 +131,17 @@ class MODiffuser(TrajectoryModel):
 
         self.diffusion = diffusion_config(self._model)
 
-    def forward(self, cond) -> Sample:
+    def forward(self, cond, target_return, *args, **kwargs) -> Sample:
         # return -> Sample(<denoised traj>, <some? value>, <trajs chain>)
         # Just for sampling
-        return self.diffusion.forward(cond, self.batch_size)
+        batch_size = target_return.shape[0]
+        return self.diffusion.forward(cond, batch_size, target_return, *args, **kwargs)
 
     def get_action(self, states, actions, rtg, pref, timesteps):
         ''' Predict a_t using s_{t-N:t} and a_{t-N:t-1}, as in DMBP (# TODO: may need train also like in DMBP, i.e. a non-Markovian loss) '''
-        
-        action = self.act_fn(states, actions, rtg, pref, timesteps)
+        rtg = rtg[-1]
+        target_return = torch.ones((states.shape[0], rtg.shape[-1]), dtype=torch.float32, device=rtg.device) # Maximizing traj returns
+        action = self.act_fn(states, actions, rtg, pref, timesteps, target_return)
         return action
 
     def _pad_or_clip(self, traj):
@@ -160,7 +172,7 @@ class MODiffuser(TrajectoryModel):
             conds.update({'a': None})
             
         if s is not None:
-            conds.update({'s' : Inpaint(0, self.cond_M, s)})
+            conds.update({'s' : Inpaint(0, self.cond_M - int(a is None), s)})
         else:
             conds.update({'s': None})
             
@@ -171,42 +183,42 @@ class MODiffuser(TrajectoryModel):
 
         return conds
 
-    def _bc_get_action(self, states, actions, rtg, pref, t):
+    def _bc_get_action(self, states, actions, rtg, pref, t, target_return):
         # Preprocess
         actions = self._pad_or_clip(actions)
         states = self._pad_or_clip(states)
+        rtg = self._pad_or_clip(rtg)
         
         conds = self._make_cond(actions, states, None)
-        traj_gen = self.forward(conds).trajectories
+        traj_gen = self.forward(conds, target_return, verbose=self.verbose).trajectories
         action = traj_gen[0, self.cond_M - 1, : self.act_dim]
 
         return action
 
-    def _dd_get_action(self, states, actions, rtg, pref, t): # TODO implement InvDynDiffusion
+    def _dd_get_action(self, states, actions, rtg, pref, t, target_return): # Refer DD:Alg.1
         # Preprocess
         states = self._pad_or_clip(states)
         rtg = self._pad_or_clip(rtg)
         
         conds = self._make_cond(None, states, rtg)
-        traj_gen = self.forward(conds).trajectories
-        action = traj_gen[0, self.cond_M - 1, : self.act_dim]
-        
+        traj_gen = self.forward(conds, target_return, verbose=self.verbose).trajectories
+        state_traj = traj_gen[:, :, :self.state_dim]
+        s_t, s_t_1 = state_traj[:, -2, :], state_traj[:, -1, :]
+        s_comb_t = torch.cat([s_t, s_t_1], dim=-1)
+        action = self.diffusion.inv_model(s_comb_t)
         return action
 
-    def _dt_get_action(self, states, actions, rtg, pref, t):
+    def _dt_get_action(self, states, actions, rtg, pref, t, target_return):
         # Preprocess
         actions = self._pad_or_clip(actions)
         states = self._pad_or_clip(states)
         rtg = self._pad_or_clip(rtg)
         
         conds = self._make_cond(actions, states, rtg)
-        traj_gen = self.forward(conds).trajectories
+        traj_gen = self.forward(conds, target_return, verbose=self.verbose).trajectories
         action = traj_gen[0, self.cond_M - 1, : self.act_dim]
         
         return action
-
-    # def _td_get_action(self, states, actions, rtg, pref, t):
-    #     pass
     
     # Save model parameters
     def save_model(self, file_name):

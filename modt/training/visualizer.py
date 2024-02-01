@@ -10,6 +10,7 @@ from modt.utils import (
 )
 from copy import deepcopy
 import pickle
+from data_generation.custom_pref import HOLES, HOLES_v3
 
 
 def visualize(rollout_logs, logsdir, cur_step, only_hv_sp=False, infos={}):
@@ -350,6 +351,14 @@ def cal_from_data(
 ):
     assert num_traj >= num_plot
     generation_path = f"data_generation/{data_path}"
+    for i, d in enumerate(datasets):
+        if d.endswith('custom'):
+            if env_name == 'MO-Hopper-v3':
+                hole = HOLES_v3
+            else:
+                hole = HOLES
+            datasets[i] += f'_{hole}'
+            print(datasets[i])
     dataset_paths = [
         f"{generation_path}/{env_name}/{env_name}_{num_traj}_new{d}.pkl"
         for d in datasets
@@ -427,11 +436,9 @@ def cal_from_data(
 
 
 def cal_all():
-    for env in [
-        "MO-Hopper-v3"
-    ]:  # ['MO-Ant-v2', 'MO-HalfCheetah-v2', 'MO-Hopper-v2', 'MO-Hopper-v3', 'MO-Swimmer-v2', 'MO-Walker2d-v2']
+    for env in ['MO-Ant-v2', 'MO-HalfCheetah-v2', 'MO-Hopper-v2', 'MO-Hopper-v3', 'MO-Swimmer-v2', 'MO-Walker2d-v2']:
         for policy in ["expert", "amateur"]:
-            for dist in ["narrow", "uniform", "wide"]:
+            for dist in ["narrow", "uniform", "wide", "custom"]:
                 dataset = f"{policy}_{dist}"
                 num_traj, num_plot = 50000, 1000
                 print(f"cal: {env}_{dataset}_{num_traj} use {num_plot} samples...")
@@ -442,17 +449,18 @@ def cal_all():
 
 import argparse
 if __name__ == "__main__":
-    # cal_all()
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--env_name', type=str, default='MO-Hopper-v2')
-    parser.add_argument('--collect_type', type=str, default="expert")
-    # narrow, wide, uniform, custom
-    parser.add_argument('--preference_type', type=str, default="custom")
-    parser.add_argument('--num_traj', type=int, default=10000)
-    parser.add_argument('--num_plot', type=int, default=1000)
-    parser.add_argument('--data_path', type=str, default="data_collected")
-    parser.add_argument('--p_bar', type=bool, default=False)
-    args = parser.parse_args()
+    cal_all()
     
-    dataset = f"{args.collect_type}_{args.preference_type}"
-    cal_from_data(datasets=[dataset], env_name=args.env_name, num_traj=args.num_traj, num_plot=args.num_plot, data_path=args.data_path)
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument('--env_name', type=str, default='MO-Hopper-v2')
+    # parser.add_argument('--collect_type', type=str, default="expert")
+    # # narrow, wide, uniform, custom
+    # parser.add_argument('--preference_type', type=str, default="custom")
+    # parser.add_argument('--num_traj', type=int, default=10000)
+    # parser.add_argument('--num_plot', type=int, default=1000)
+    # parser.add_argument('--data_path', type=str, default="data_collected")
+    # parser.add_argument('--p_bar', type=bool, default=False)
+    # args = parser.parse_args()
+    
+    # dataset = f"{args.collect_type}_{args.preference_type}"
+    # cal_from_data(datasets=[dataset], env_name=args.env_name, num_traj=args.num_traj, num_plot=args.num_plot, data_path=args.data_path)

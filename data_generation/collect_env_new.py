@@ -14,7 +14,7 @@ from a2c_ppo_acktr import algo
 import os
 import sys
 from morl.hypervolume import InnerHyperVolume
-
+from custom_pref import HOLES, HOLES_v3, RejectHole
 
 def compute_hypervolume(ep_objs_batch):
     n = len(ep_objs_batch[0])
@@ -94,16 +94,17 @@ env_names_and_infos = {
     }
 }
 
-# if customize preference, use HoleSampling with the following config
-Holes = namedtuple("Holes", "points radius")
-HOLES = Holes(points=[np.array([2/5, 3/5]), np.array([3/5, 2/5])], radius=0.005)
-HOLES_v3 = Holes(points=[np.array([1/3, 1/3, 1/3])], radius=0.01)
-
 
 def collect_helper(args, all_datas):
     data_path = f"{args.data_path}/{args.env_name}"
     if not os.path.exists(data_path):
         os.makedirs(data_path)
+    if args.preference_type == 'custom':
+        if args.env_name == 'MO-Hopper-v3':
+            hole = HOLES_v3
+        else:
+            hole = HOLES
+        args.preference_type += f'_{hole}'
     filename = f"{data_path}/{args.env_name}_{args.num_traj}_new{args.collect_type}_{args.preference_type}.pkl"
     with open(filename, "wb") as f:
         pickle.dump(all_datas, f)
@@ -164,18 +165,6 @@ class PrefDist:
 
     def __call__(self, pref_dim, n_pref):
         return self.pref_func(pref_dim, n_pref)
-
-
-class RejectHole:
-    def __init__(self, points, radius) -> None:
-        self.ps = points
-        self.r = radius
-
-    def __contains__(self, coor):
-        for p_coor in self.ps:
-            if np.sum((p_coor - coor) ** 2) < self.r:  # reject if in the reject region
-                return True
-        return False
 
 
 class RejectSampling:

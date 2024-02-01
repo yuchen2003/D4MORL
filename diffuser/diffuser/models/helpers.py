@@ -49,15 +49,20 @@ class Conv1dBlock(nn.Module):
         Conv1d --> GroupNorm --> Mish
     '''
 
-    def __init__(self, inp_channels, out_channels, kernel_size, n_groups=8):
+    def __init__(self, inp_channels, out_channels, kernel_size, mish=True, n_groups=8):
         super().__init__()
+        
+        if mish:
+            act_fn = nn.Mish()
+        else:
+            act_fn = nn.SiLU()
 
         self.block = nn.Sequential(
             nn.Conv1d(inp_channels, out_channels, kernel_size, padding=kernel_size // 2),
             Rearrange('batch channels horizon -> batch channels 1 horizon'),
             nn.GroupNorm(n_groups, out_channels),
             Rearrange('batch channels 1 horizon -> batch channels horizon'),
-            nn.Mish(),
+            act_fn,
         )
 
     def forward(self, x):
@@ -169,6 +174,21 @@ class WeightedLoss(nn.Module):
         a0_loss = (loss[:, 0, :self.action_dim] / self.weights[0, :self.action_dim]).mean()
         return weighted_loss, {'a0_loss': a0_loss}
 
+class WeightedStateLoss(nn.Module):
+
+    def __init__(self, weights):
+        super().__init__()
+        self.register_buffer('weights', weights)
+
+    def forward(self, pred, targ):
+        '''
+            pred, targ : tensor
+                [ batch_size x horizon x transition_dim ]
+        '''
+        loss = self._loss(pred, targ)
+        weighted_loss = (loss * self.weights).mean()
+        return weighted_loss, {'a0_loss': weighted_loss}
+
 class ValueLoss(nn.Module):
     def __init__(self, *args):
         super().__init__()
@@ -213,9 +233,15 @@ class ValueL2(ValueLoss):
     def _loss(self, pred, targ):
         return F.mse_loss(pred, targ, reduction='none')
 
+class WeightedStateL2(WeightedStateLoss):
+
+    def _loss(self, pred, targ):
+        return F.mse_loss(pred, targ, reduction='none')
+
 Losses = {
     'l1': WeightedL1,
     'l2': WeightedL2,
     'value_l1': ValueL1,
     'value_l2': ValueL2,
+    'state_l2': WeightedStateL2,
 }

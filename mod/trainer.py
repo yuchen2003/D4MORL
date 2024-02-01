@@ -5,7 +5,8 @@ from diffuser import utils
 from collections import namedtuple
 from copy import deepcopy
 
-Batch = namedtuple('Batch', 'trajs, conds')
+Batch = namedtuple('Batch', 'trajs conds returns') # return can be reward or rtg
+aBatch = namedtuple('ActionBatch', 'trajs actions conds returns') # for invdyn
 
 class DiffuserTrainer(Trainer):
     def __init__(
@@ -55,7 +56,7 @@ class DiffuserTrainer(Trainer):
         self.args = args = self.model.args
         trainer_config = utils.Config(
             utils.Trainer,
-            savepath=(args.savepath, 'trainer_config.pkl'),
+            savepath=(args.savepath, 'trainer_config'),
             # train_batch_size=args.batch_size,
             train_lr=args.learning_rate,
             gradient_accumulate_every=args.gradient_accumulate_every,
@@ -88,9 +89,10 @@ class DiffuserTrainer(Trainer):
     def train_step(self):
         s, a, r, g, t, mask, p = self.get_batch()
         g = g[:, :-1]
+        traj_returns = r.sum(1) / r.shape[1]
 
         # Prepare training batch
-        batch = self.batch_fn(s, a, r, g, t, mask, p)
+        batch = self.batch_fn(s, a, r, g, t, mask, p, traj_returns)
 
         # Invoke diffusion trainer
         loss, infos = self.trainer.train(1, batch)
@@ -101,20 +103,18 @@ class DiffuserTrainer(Trainer):
 
         return loss, infos
 
-    def _bc_get_batch(self, s, a, r, g, t, mask, p):
-        as_trajs = torch.cat([a, s], axis=-1)
+    def _bc_get_batch(self, s, a, r, g, t, mask, p, traj_r):
+        as_trajs = torch.cat([a, s], dim=-1)
         conds = self.diffuser._make_cond(a, s, None)
-        return Batch(trajs=as_trajs, conds=conds)
+        return Batch(trajs=as_trajs, conds=conds, returns=traj_r)
 
-    def _dd_get_batch(self, s, a, r, g, t, mask, p):
-        sg_trajs = torch.cat([s, g], axis=-1)
+    def _dd_get_batch(self, s, a, r, g, t, mask, p, traj_r):
+        sg_trajs = torch.cat([s, g], dim=-1)
         conds = self.diffuser._make_cond(None, s, g)
-        return Batch(trajs=sg_trajs, conds=conds)
+        return aBatch(trajs=sg_trajs, actions=a, conds=conds, returns=traj_r)
 
-    def _dt_get_batch(self, s, a, r, g, t, mask, p):
-        asg_trajs = torch.cat([a, s, g], axis=-1)
+    def _dt_get_batch(self, s, a, r, g, t, mask, p, traj_r):
+        asg_trajs = torch.cat([a, s, g], dim=-1)
         conds = self.diffuser._make_cond(a, s, g)
-        return Batch(trajs=asg_trajs, conds=conds)
+        return Batch(trajs=asg_trajs, conds=conds, returns=traj_r)
 
-    def _td_get_batch(self, s, a, r, g, t, mask, p):
-        pass

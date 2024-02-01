@@ -17,6 +17,7 @@ from torch import nn
 from state_norm_params import state_norm_params # we use normalization parameter for states from the behavioral policy
 import random
 import json
+from data_generation.custom_pref import HOLES, HOLES_v3, RejectHole
 
 isCloseToOne = lambda x: isclose(x, 1, rel_tol=1e-12)
 def pref_grid(n_obj, max_prefs=None, min_prefs=None, granularity=5):
@@ -45,6 +46,7 @@ def seed_everything(seed: int):
 def experiment(
     variant
 ):
+    run_name = variant['run_name']
     env_name = variant['env']
     dataset = variant['dataset']
     num_traj = variant['num_traj']
@@ -75,14 +77,15 @@ def experiment(
     use_max_rtg = variant['use_max_rtg']
     use_p_bar = variant['use_p_bar']
     cons_q = variant['conservative_q']
+    returns_condition = variant['returns_condition']
     
-    is_mod = (model_type == 'mod')
-    if is_mod:
+    if model_type == 'mod':
         mod_type = variant['mod_type']
         granularity = variant['mod_eval_gran'] # TODO may modify hyperparam to make eval faster, and then this is not further needed
         infer_N = variant['infer_N'] # >= 0
         cond_M = K - infer_N
         assert cond_M >= 1 # when cond_M == 1, use no traj context (except for current state)
+        mod_verbose = variant['diffuser_sample_verbose']
     
     # Model, Trainer, Evaluator
     if model_type == 'dt':
@@ -102,18 +105,21 @@ def experiment(
         from modt.training.cql_trainer import CQLTrainer as Trainer
         from modt.evaluation.evaluator_cql import EvaluatorCQL as Evaluator
         from modt.models.cql import CQLModel as Model
-    elif model_type == 'mod':
+    elif model_type[:3] == 'mod':
         from mod.trainer import DiffuserTrainer as Trainer
         from mod.evaluator import EvaluatorMOD as Evaluator
         from mod.model import MODiffuser as Model
         from diffuser import utils
         class Parser(utils.Parser):
             config: str = "config.locomotion"
-            savepath: str = "./experiment_runs/mod_save/",
+            # savepath: str = "./experiment_runs/mod_save/",
+            savepath: str = run_name + '/'
             horizon: int = K
             n_diffusion_steps:int = variant['n_diffusion_steps']
             
         diffuser_args = Parser().parse_args("mo_diffusion")
+        if mod_type == 'dd':
+            diffuser_args.diffusion = 'models.MOGaussianInvDynDiffusion'
     else:
         raise ValueError(f"Unrecognized model: {model_type}")
     
@@ -148,6 +154,13 @@ def experiment(
     
     # if using multiple dataset, load all at once
     generation_path = "data_generation/data_collected"
+    for i, d in enumerate(dataset):
+        if d.endswith('custom'):
+            if env_name == 'MO-Hopper-v3':
+                hole = HOLES_v3
+            else:
+                hole = HOLES
+            dataset[i] += f'_{hole}'
     dataset_paths = [f"{generation_path}/{env_name}/{env_name}_{num_traj}_new{d}.pkl" for d in dataset]
     trajectories = []
     for data_path in dataset_paths:
@@ -375,6 +388,8 @@ def experiment(
             infer_N=infer_N,
             cond_M=cond_M,
             batch_size=batch_size,
+            returns_condition=returns_condition,
+            verbose=mod_verbose,
         )
         
     if model_type not in ['cql', 'mod']:
@@ -442,7 +457,6 @@ def experiment(
         use_p_bar=use_p_bar,
     )
     
-    
     for iter in range(max_iters):
 
         step = int((iter+1) * num_steps_per_iter)
@@ -477,7 +491,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--env', type=str, default='MO-Hopper-v2')
     parser.add_argument('--dataset', type=str, nargs='+', default=['expert_uniform'])
-    parser.add_argument('--num_traj', type=int, default=10000)
+    parser.add_argument('--num_traj', type=int, default=50000)
     parser.add_argument('--data_mode', type=str, default='_formal')
     parser.add_argument('--ckpt', type=str, default='')
     parser.add_argument('--mode', type=str, default='normal')  # normal for standard setting, delayed for sparse
@@ -507,7 +521,7 @@ if __name__ == '__main__':
     parser.add_argument('--concat_rtg_pref', type=int, default=0)   #   | }-> w/, w/o pref (P)
     parser.add_argument('--concat_act_pref', type=int, default=0)   #   |
     parser.add_argument('--normalize_reward', type=bool, default=False)
-    parser.add_argument('--mo_rtg', type=bool, default=False)
+    parser.add_argument('--mo_rtg', type=bool, default=True)
     parser.add_argument('--eval_only', type=bool, default=False)
     parser.add_argument('--return_loss', type=bool, default=False)
     parser.add_argument('--pref_loss', type=bool, default=False)
@@ -524,6 +538,10 @@ if __name__ == '__main__':
     parser.add_argument('--mod_eval_gran', type=int, default=50) # for fewer evaluation time
     parser.add_argument('--infer_N', type=int, default=0) # traj_gen = tau_{t-M+1:t} (M cond) ## tau_{t+1:t+N} (N infer); notice a_hat = a_t
     parser.add_argument('--n_diffusion_steps', type=int, default=20)
+    parser.add_argument('--returns_condition', type=bool, default=False)
+    parser.add_argument('--diffuser_sample_verbose', type=bool, default=False)
+    
+    parser.add_argument('--remark', type=str, default=None)
     args = parser.parse_args()
     
     seed = args.seed if args.seed is not None else np.random.randint(0, 100000)
@@ -536,7 +554,10 @@ if __name__ == '__main__':
     else:
         typ = 'normal'
     if args.model_type == 'mod':
-        args.model_type += f'/{args.mod_type}'
+        typ += f'/{args.mod_type}'
+    if args.remark is not None:
+        args.dir += f'/{args.remark}'
+        
     args.run_name = f"{args.dir}/{args.model_type}/{typ}/{args.env}/{dataset_name}/{args.seed}"
         
     if not os.path.exists(args.run_name):
@@ -546,11 +567,11 @@ if __name__ == '__main__':
         
         if args.model_type == 'cql':
             from modt.models.cql import CQL_config
-            json_str_cql = json.dumps(CQL_config, indent=2)
+            json_str_2 = ',\n\n' + json.dumps(CQL_config, indent=2)
         else:
-            json_str_cql = ''
+            json_str_2 = ',\n\n'
             
-        f.write('[' + json_str + ',\n\n' + json_str_cql + ']')
+        f.write('[' + json_str + json_str_2)
 
     if args.log_to_wandb:
         wandb.init(

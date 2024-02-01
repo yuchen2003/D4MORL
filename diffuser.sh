@@ -9,4 +9,13 @@ CUDA_VISIBLE_DEVICES=1 python experiment.py --dir experiment_runs/mod_impl --env
 CUDA_VISIBLE_DEVICES=1 python experiment.py --dir experiment_runs/mod_impl --env MO-Swimmer-v2 --data_mode _formal --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --mo_rtg True --seed 2 --dataset expert_custom --model_type mod --num_steps_per_iter 1000 --max_iters 20 --use_p_bar True --K 16 --infer_N 0 --n_diffusion_steps 20 --mod_type dt &
 wait
 
-# ([dd|dt] x) diffusion_step [10|20] x [uniform|custom]
+# expert_[4]
+
+CUDA_VISIBLE_DEVICES=0 python experiment.py --dir experiment_runs/mod_impl --env MO-HalfCheetah-v2 --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_custom --model_type mod --mod_type bc --num_steps_per_iter 10000 --max_iters 10 --use_p_bar True --K 32 --n_diffusion_steps 10 --returns_condition False &
+CUDA_VISIBLE_DEVICES=1 python experiment.py --dir experiment_runs/mod_impl --env MO-HalfCheetah-v2 --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_uniform --model_type mod --mod_type bc --num_steps_per_iter 10000 --max_iters 10 --use_p_bar True --K 32 --n_diffusion_steps 10 --returns_condition False &
+CUDA_VISIBLE_DEVICES=0 python experiment.py --dir experiment_runs/mod_impl --env MO-HalfCheetah-v2 --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_custom --model_type mod --mod_type dt --num_steps_per_iter 10000 --max_iters 10 --use_p_bar True --K 32 --n_diffusion_steps 10 --returns_condition False &
+CUDA_VISIBLE_DEVICES=1 python experiment.py --dir experiment_runs/mod_impl --env MO-HalfCheetah-v2 --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_uniform --model_type mod --mod_type dt --num_steps_per_iter 10000 --max_iters 10 --use_p_bar True --K 32 --n_diffusion_steps 10 --returns_condition False &
+CUDA_VISIBLE_DEVICES=0 python experiment.py --dir experiment_runs/mod_impl --env MO-HalfCheetah-v2 --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_custom --model_type mod --mod_type dd --num_steps_per_iter 10000 --max_iters 10 --use_p_bar True --K 32 --n_diffusion_steps 10 --returns_condition True &
+CUDA_VISIBLE_DEVICES=1 python experiment.py --dir experiment_runs/mod_impl --env MO-HalfCheetah-v2 --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_uniform --model_type mod --mod_type dd --num_steps_per_iter 10000 --max_iters 10 --use_p_bar True --K 32 --n_diffusion_steps 10 --returns_condition True &
+wait
+

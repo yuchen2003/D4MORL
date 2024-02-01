@@ -2,31 +2,89 @@ import torch
 import torch.nn as nn
 import einops
 from einops.layers.torch import Rearrange
+from einops import rearrange
 import pdb
+from torch.distributions import Bernoulli
 
 from .helpers import (
     SinusoidalPosEmb,
     Downsample1d,
     Upsample1d,
     Conv1dBlock,
-    Residual,
-    PreNorm,
-    LinearAttention,
 )
 
+class Residual(nn.Module):
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+
+    def forward(self, x, *args, **kwargs):
+        return self.fn(x, *args, **kwargs) + x
+
+class PreNorm(nn.Module):
+    def __init__(self, dim, fn):
+        super().__init__()
+        self.fn = fn
+        self.norm = nn.InstanceNorm2d(dim, affine = True)
+
+    def forward(self, x):
+        x = self.norm(x)
+        return self.fn(x)
+
+class LinearAttention(nn.Module):
+    def __init__(self, dim, heads = 4, dim_head = 128):
+        super().__init__()
+        self.heads = heads
+        hidden_dim = dim_head * heads
+        self.to_qkv = nn.Conv2d(dim, hidden_dim * 3, 1, bias = False)
+        self.to_out = nn.Conv2d(hidden_dim, dim, 1)
+
+    def forward(self, x):
+        b, c, h, w = x.shape
+        qkv = self.to_qkv(x)
+        q, k, v = rearrange(qkv, 'b (qkv heads c) h w -> qkv b heads c (h w)', heads = self.heads, qkv=3)
+        k = k.softmax(dim=-1)
+        context = torch.einsum('bhdn,bhen->bhde', k, v)
+        out = torch.einsum('bhde,bhdn->bhen', context, q)
+        out = rearrange(out, 'b heads c (h w) -> b (heads c) h w', heads=self.heads, h=h, w=w)
+        return self.to_out(out)
+
+
+class GlobalMixing(nn.Module):
+    def __init__(self, dim, heads = 4, dim_head = 128):
+        super().__init__()
+        self.heads = heads
+        hidden_dim = dim_head * heads
+        self.to_qkv = nn.Conv2d(dim, hidden_dim * 3, 1, bias = False)
+        self.to_out = nn.Conv2d(hidden_dim, dim, 1)
+
+    def forward(self, x):
+        b, c, h, w = x.shape
+        qkv = self.to_qkv(x)
+        q, k, v = rearrange(qkv, 'b (qkv heads c) h w -> qkv b heads c (h w)', heads = self.heads, qkv=3)
+        k = k.softmax(dim=-1)
+        context = torch.einsum('bhdn,bhen->bhde', k, v)
+        out = torch.einsum('bhde,bhdn->bhen', context, q)
+        out = rearrange(out, 'b heads c (h w) -> b (heads c) h w', heads=self.heads, h=h, w=w)
+        return self.to_out(out)
 
 class ResidualTemporalBlock(nn.Module):
 
-    def __init__(self, inp_channels, out_channels, embed_dim, horizon, kernel_size=5):
+    def __init__(self, inp_channels, out_channels, embed_dim, horizon, kernel_size=5, mish=True):
         super().__init__()
 
         self.blocks = nn.ModuleList([
-            Conv1dBlock(inp_channels, out_channels, kernel_size),
-            Conv1dBlock(out_channels, out_channels, kernel_size),
+            Conv1dBlock(inp_channels, out_channels, kernel_size, mish),
+            Conv1dBlock(out_channels, out_channels, kernel_size, mish),
         ])
 
+        if mish:
+            act_fn = nn.Mish()
+        else:
+            act_fn = nn.SiLU()
+
         self.time_mlp = nn.Sequential(
-            nn.Mish(),
+            act_fn,
             nn.Linear(embed_dim, out_channels),
             Rearrange('batch t -> batch t 1'),
         )
@@ -43,6 +101,7 @@ class ResidualTemporalBlock(nn.Module):
         '''
         out = self.blocks[0](x) + self.time_mlp(t)
         out = self.blocks[1](out)
+
         return out + self.residual_conv(x)
 
 
@@ -53,23 +112,54 @@ class TemporalUnet(nn.Module):
         horizon,
         transition_dim,
         cond_dim,
-        dim=32,
+        rtg_dim,
+        dim=128,
         dim_mults=(1, 2, 4, 8),
         attention=False,
+        returns_condition=False,
+        condition_dropout=0.1,
+        calc_energy=False,
+        kernel_size=5,
     ):
         super().__init__()
 
-        dims = [transition_dim, *map(lambda m: dim * m, dim_mults)] # trans_dim, 32, ..., 256
+        dims = [transition_dim, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
         print(f'[ models/temporal ] Channel dimensions: {in_out}')
 
-        time_dim = dim
+        if calc_energy:
+            mish = False
+            act_fn = nn.SiLU()
+        else:
+            mish = True
+            act_fn = nn.Mish()
+
+        self.rtg_dim = rtg_dim
+        self.returns_dim = dim
+
         self.time_mlp = nn.Sequential(
             SinusoidalPosEmb(dim),
             nn.Linear(dim, dim * 4),
-            nn.Mish(),
+            act_fn,
             nn.Linear(dim * 4, dim),
         )
+
+        self.returns_condition = returns_condition
+        self.condition_dropout = condition_dropout
+        self.calc_energy = calc_energy
+
+        if self.returns_condition:
+            self.returns_mlp = nn.Sequential(
+                        nn.Linear(self.rtg_dim, dim),
+                        act_fn,
+                        nn.Linear(dim, dim * 4),
+                        act_fn,
+                        nn.Linear(dim * 4, dim),
+                    ) # For conditioning on rtg|reward|pref
+            self.mask_dist = Bernoulli(probs=1-self.condition_dropout)
+            embed_dim = 2 * dim # Time embed + rtg embed
+        else:
+            embed_dim = dim # Only time embed
 
         self.downs = nn.ModuleList([])
         self.ups = nn.ModuleList([])
@@ -80,8 +170,8 @@ class TemporalUnet(nn.Module):
             is_last = ind >= (num_resolutions - 1)
 
             self.downs.append(nn.ModuleList([
-                ResidualTemporalBlock(dim_in, dim_out, embed_dim=time_dim, horizon=horizon),
-                ResidualTemporalBlock(dim_out, dim_out, embed_dim=time_dim, horizon=horizon),
+                ResidualTemporalBlock(dim_in, dim_out, embed_dim=embed_dim, horizon=horizon, kernel_size=kernel_size, mish=mish),
+                ResidualTemporalBlock(dim_out, dim_out, embed_dim=embed_dim, horizon=horizon, kernel_size=kernel_size, mish=mish),
                 Residual(PreNorm(dim_out, LinearAttention(dim_out))) if attention else nn.Identity(),
                 Downsample1d(dim_out) if not is_last else nn.Identity()
             ]))
@@ -90,16 +180,16 @@ class TemporalUnet(nn.Module):
                 horizon = horizon // 2
 
         mid_dim = dims[-1]
-        self.mid_block1 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim, horizon=horizon)
+        self.mid_block1 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=embed_dim, horizon=horizon, kernel_size=kernel_size, mish=mish)
         self.mid_attn = Residual(PreNorm(mid_dim, LinearAttention(mid_dim))) if attention else nn.Identity()
-        self.mid_block2 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim, horizon=horizon)
+        self.mid_block2 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=embed_dim, horizon=horizon, kernel_size=kernel_size, mish=mish)
 
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (num_resolutions - 1)
 
             self.ups.append(nn.ModuleList([
-                ResidualTemporalBlock(dim_out * 2, dim_in, embed_dim=time_dim, horizon=horizon),
-                ResidualTemporalBlock(dim_in, dim_in, embed_dim=time_dim, horizon=horizon),
+                ResidualTemporalBlock(dim_out * 2, dim_in, embed_dim=embed_dim, horizon=horizon, kernel_size=kernel_size, mish=mish),
+                ResidualTemporalBlock(dim_in, dim_in, embed_dim=embed_dim, horizon=horizon, kernel_size=kernel_size, mish=mish),
                 Residual(PreNorm(dim_in, LinearAttention(dim_in))) if attention else nn.Identity(),
                 Upsample1d(dim_in) if not is_last else nn.Identity()
             ]))
@@ -108,18 +198,33 @@ class TemporalUnet(nn.Module):
                 horizon = horizon * 2
 
         self.final_conv = nn.Sequential(
-            Conv1dBlock(dim, dim, kernel_size=5),
+            Conv1dBlock(dim, dim, kernel_size=kernel_size, mish=mish),
             nn.Conv1d(dim, transition_dim, 1),
         )
 
-    def forward(self, x, cond, time):
+    def forward(self, x, cond, time, returns=None, use_dropout=True, force_dropout=False):
         '''
             x : [ batch x horizon x transition ]
+            returns : [batch x horizon x pref_dim]
         '''
+        if self.calc_energy:
+            x_inp = x
 
         x = einops.rearrange(x, 'b h t -> b t h')
 
         t = self.time_mlp(time)
+
+        if self.returns_condition:
+            assert returns is not None
+            returns_embed = self.returns_mlp(returns)
+            if use_dropout:
+                # mask = self.mask_dist.sample(sample_shape=(returns_embed.size(0), 1)).to(returns_embed.device)
+                mask = self.mask_dist.sample(sample_shape=returns_embed.shape).to(returns_embed.device)
+                returns_embed = mask * returns_embed
+            if force_dropout:
+                returns_embed = 0 * returns_embed
+            t = torch.cat([t, returns_embed], dim=-1)
+
         h = []
 
         for resnet, resnet2, attn, downsample in self.downs:
@@ -143,7 +248,14 @@ class TemporalUnet(nn.Module):
         x = self.final_conv(x)
 
         x = einops.rearrange(x, 'b t h -> b h t')
-        return x
+        
+        if self.calc_energy:
+            # Energy function
+            energy = ((x - x_inp)**2).mean()
+            grad = torch.autograd.grad(outputs=energy, inputs=x_inp, create_graph=True)
+            return grad[0]
+        else:
+            return x
 
 
 class ValueFunction(nn.Module):

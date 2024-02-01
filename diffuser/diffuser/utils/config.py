@@ -2,6 +2,7 @@ import os
 import collections
 import importlib
 import pickle
+import json
 
 def import_class(_class):
     if type(_class) is not str: return _class
@@ -33,11 +34,13 @@ class Config(collections.Mapping):
 
         if savepath is not None:
             savepath = os.path.join(*savepath) if type(savepath) is tuple else savepath
-            pickle.dump(self, open(savepath, 'wb'))
-            print(f'[ utils/config ] Saved config to: {savepath}\n')
+            # pickle.dump(self, open(savepath + '.pkl', 'wb'))
+            json.dump(self._dict, open(savepath + '.json', 'w'), indent=2)
+            
+            print(f'[ utils/config ] Saved config to: {savepath} (json/pkl)\n')
 
     def __repr__(self):
-        string = f'\n[utils/config ] Config: {self._class}\n'
+        string = f'\n[ utils/config ] Config: {self._class}\n'
         for key in sorted(self._dict.keys()):
             val = self._dict[key]
             string += f'    {key}: {val}\n'

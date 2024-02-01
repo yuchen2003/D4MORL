@@ -11,6 +11,7 @@ class EvaluatorMOD(Evaluator):
 
         model.eval()
         model.to(device=self.device)
+        print(f'[ eval ] target pref: {target_pref}, cur_step: {cur_step}')
 
         with torch.no_grad():
             init_target_return = deepcopy(target_return)
@@ -55,6 +56,7 @@ class EvaluatorMOD(Evaluator):
                 shape=(self.pref_dim), dtype=np.float32)
 
             cum_r_original = np.zeros(shape=(self.pref_dim), dtype=np.float32)
+            
             for t in range(self.max_ep_len):
                 # add padding
                 actions = torch.cat([actions, torch.zeros(
