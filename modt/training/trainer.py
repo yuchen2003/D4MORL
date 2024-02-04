@@ -28,7 +28,7 @@ class Trainer:
         concat_act_pref=0,
         logsdir='./',
         use_p_bar=False,
-        
+        datapath=None,
     ):
         self.model = model
         self.optimizer = optimizer
@@ -52,6 +52,7 @@ class Trainer:
         self.diagnostics = dict()
         self.start_time = time.time()
         self.use_p_bar = use_p_bar
+        self.datapath = datapath
 
     def train_iteration(self, ep):
         cur_step = (ep+1) * self.n_steps_per_iter
@@ -126,8 +127,15 @@ class Trainer:
             'rollout_weighted_raw_r': rollout_weighted_raw_r, # for finding [achieved return vs. target return]
             'rollout_original_raw_r': rollout_original_raw_r, # unnormalized raw_r, for calculating roll-out ratio
         }
-        
-        visualize(rollout_logs, self.logsdir, cur_step)
+        infos = {
+        "env": 'unspecified',
+        "dataset": 'unspecified',
+        "num_traj": 'unspecified',
+        'datapath': self.datapath,
+        'eps': 0.02,
+        'ret_eps': 20,
+        }
+        visualize(rollout_logs, self.logsdir, cur_step, infos={'datapath': self.datapath, 'eps': 0.02}, draw_ood=True)
         
         if not self.eval_only:
             cur_step = (ep+1) * self.n_steps_per_iter

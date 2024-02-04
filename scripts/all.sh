@@ -1,8 +1,8 @@
 DIR="experiment_runs/all"
 
-for TYPE in normal naive
+for TYPE in naive # normal naive
 do
-    for MODEL in dt rvs bc cql
+    for MODEL in dt bc # dt rvs bc cql
     do
         for ENV in MO-Hopper-v2 MO-Swimmer-v2 MO-Ant-v2 MO-HalfCheetah-v2 MO-Walker2d-v2 MO-Hopper-v3
         do
@@ -60,3 +60,8 @@ do
         done
     done
 done
+
+exit
+
+CUDA_VISIBLE_DEVICES=1 python experiment.py --dir experiment_runs/all --env MO-Ant-v2 --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_uniform --model_type dt --num_steps_per_iter 10000 --max_iters 2
+CUDA_VISIBLE_DEVICES=0 python experiment.py --dir experiment_runs/all --env MO-Ant-v2 --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_uniform --model_type rvs --num_steps_per_iter 100000 --max_iters 2

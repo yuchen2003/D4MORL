@@ -30,6 +30,7 @@ class DiffuserTrainer(Trainer):
         concat_act_pref=0,
         logsdir="./",
         use_p_bar=False,
+        datapath=None,
     ):
         super().__init__(
             model,
@@ -51,6 +52,7 @@ class DiffuserTrainer(Trainer):
             concat_act_pref,
             logsdir,
             use_p_bar,
+            datapath=datapath,
         )
 
         self.args = args = self.model.args
@@ -80,8 +82,6 @@ class DiffuserTrainer(Trainer):
             self.batch_fn = self._dd_get_batch
         elif self.mod_type == 'dt':
             self.batch_fn = self._dt_get_batch
-        elif self.mod_type == 'td':
-            self.batch_fn = self._td_get_batch
             
         self.infer_N = self.model.infer_N
         self.cond_M = self.model.cond_M
@@ -109,12 +109,12 @@ class DiffuserTrainer(Trainer):
         return Batch(trajs=as_trajs, conds=conds, returns=traj_r)
 
     def _dd_get_batch(self, s, a, r, g, t, mask, p, traj_r):
-        sg_trajs = torch.cat([s, g], dim=-1)
-        conds = self.diffuser._make_cond(None, s, g)
+        sg_trajs = torch.cat([s, r], dim=-1)
+        conds = self.diffuser._make_cond(None, s, r)
         return aBatch(trajs=sg_trajs, actions=a, conds=conds, returns=traj_r)
 
     def _dt_get_batch(self, s, a, r, g, t, mask, p, traj_r):
-        asg_trajs = torch.cat([a, s, g], dim=-1)
-        conds = self.diffuser._make_cond(a, s, g)
+        asg_trajs = torch.cat([a, s, r], dim=-1)
+        conds = self.diffuser._make_cond(a, s, r)
         return Batch(trajs=asg_trajs, conds=conds, returns=traj_r)
 

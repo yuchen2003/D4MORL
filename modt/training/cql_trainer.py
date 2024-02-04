@@ -27,6 +27,7 @@ class CQLTrainer(Trainer):
         concat_act_pref=0,
         logsdir="./",
         use_p_bar=False,
+        datapath=None,
     ):
         super().__init__(
             model,

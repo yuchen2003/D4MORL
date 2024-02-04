@@ -138,8 +138,7 @@ class MODiffuser(TrajectoryModel):
         return self.diffusion.forward(cond, batch_size, target_return, *args, **kwargs)
 
     def get_action(self, states, actions, rtg, pref, timesteps):
-        ''' Predict a_t using s_{t-N:t} and a_{t-N:t-1}, as in DMBP (# TODO: may need train also like in DMBP, i.e. a non-Markovian loss) '''
-        rtg = rtg[-1]
+        ''' Predict a_t using s_{t-N:t} and a_{t-N:t-1}, as in DMBP '''
         target_return = torch.ones((states.shape[0], rtg.shape[-1]), dtype=torch.float32, device=rtg.device) # Maximizing traj returns
         action = self.act_fn(states, actions, rtg, pref, timesteps, target_return)
         return action
@@ -187,7 +186,6 @@ class MODiffuser(TrajectoryModel):
         # Preprocess
         actions = self._pad_or_clip(actions)
         states = self._pad_or_clip(states)
-        rtg = self._pad_or_clip(rtg)
         
         conds = self._make_cond(actions, states, None)
         traj_gen = self.forward(conds, target_return, verbose=self.verbose).trajectories
@@ -203,7 +201,7 @@ class MODiffuser(TrajectoryModel):
         conds = self._make_cond(None, states, rtg)
         traj_gen = self.forward(conds, target_return, verbose=self.verbose).trajectories
         state_traj = traj_gen[:, :, :self.state_dim]
-        s_t, s_t_1 = state_traj[:, -2, :], state_traj[:, -1, :]
+        s_t, s_t_1 = state_traj[[-1], -2, :], state_traj[[-1], -1, :]
         s_comb_t = torch.cat([s_t, s_t_1], dim=-1)
         action = self.diffusion.inv_model(s_comb_t)
         return action

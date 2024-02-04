@@ -10,10 +10,10 @@ from modt.utils import (
 )
 from copy import deepcopy
 import pickle
-from data_generation.custom_pref import HOLES, HOLES_v3
+from data_generation.custom_pref import HOLES, HOLES_v3, RejectHole
 
 
-def visualize(rollout_logs, logsdir, cur_step, only_hv_sp=False, infos={}):
+def visualize(rollout_logs, logsdir, cur_step, only_hv_sp=False, infos={}, draw_ood=False):
     n_obj = rollout_logs["n_obj"]
     dataset_min_prefs = rollout_logs["dataset_min_prefs"]
     dataset_max_prefs = rollout_logs["dataset_max_prefs"]
@@ -34,6 +34,24 @@ def visualize(rollout_logs, logsdir, cur_step, only_hv_sp=False, infos={}):
         for i in range(rollout_unweighted_raw_r.shape[0])
     ]
     face_colors = ["none" for i in range(rollout_unweighted_raw_r.shape[0])]
+    
+    pref_edge_colors = deepcopy(edge_colors)
+    if draw_ood:
+        with open(infos['datapath'], 'rb') as f:
+            trajectories = pickle.load(f)
+        prefs = []
+        for traj in trajectories:
+            prefs.append(list(traj['preference'][0]))
+        # prefs = sorted(prefs, key=lambda x: x[0])
+        prefs = np.array(prefs)
+        
+        for i, t_pref in enumerate(target_prefs):
+            min_dist = np.min(np.sum(np.abs(t_pref - prefs), axis=1))
+            if min_dist > infos['eps']:
+                if pref_edge_colors[i] == 'r':
+                    pref_edge_colors[i] = 'y' # Color(y) = Color(r) + Color(g)
+                else:
+                    pref_edge_colors[i] = 'g'
 
     hv = compute_hypervolume(
         rollout_original_raw_r
@@ -69,13 +87,13 @@ def visualize(rollout_logs, logsdir, cur_step, only_hv_sp=False, infos={}):
             rollout_original_raw_r[:, 1],
             label=f"hv: {hv:.3e}\npts: {n_points}\nsp: {np.round(sparsity, 2)}",
             facecolors=face_colors,
-            edgecolors=edge_colors,
+            edgecolors=pref_edge_colors,
         )
         axes[cur_ax].set_xlim([0, max(rollout_original_raw_r[:, 0]) * 1.05])
         axes[cur_ax].set_ylim([0, max(rollout_original_raw_r[:, 1]) * 1.05])
         axes[cur_ax].set_title(f"Obj 0 vs Obj 1")
         axes[cur_ax].set(xlabel="Obj 0", ylabel="Obj 1")
-        axes[cur_ax].legend(loc="center left")
+        axes[cur_ax].legend(loc="lower right")
         cur_ax += 1
     # change to 3d pareto front
     elif n_obj == 3:
@@ -87,14 +105,14 @@ def visualize(rollout_logs, logsdir, cur_step, only_hv_sp=False, infos={}):
             rollout_original_raw_r[:, 2],
             label=f"hv: {hv:.3e}\npts: {n_points}\nsp: {np.round(sparsity, 2)}",
             facecolors=face_colors,
-            edgecolors=edge_colors,
+            edgecolors=pref_edge_colors,
         )
         axes[cur_ax].set_xlim3d([0, max(rollout_original_raw_r[:, 0]) * 1.05])
         axes[cur_ax].set_ylim3d([0, max(rollout_original_raw_r[:, 1]) * 1.05])
         axes[cur_ax].set_zlim3d([0, max(rollout_original_raw_r[:, 2]) * 1.05])
         axes[cur_ax].set_title(f"Obj 1 vs. Obj 2 vs. Obj 3")
         axes[cur_ax].set(xlabel="Obj 1", ylabel="Obj 2", zlabel="Obj 3")
-        axes[cur_ax].legend(loc="lower center")
+        axes[cur_ax].legend(loc="lower right")
         cur_ax += 1
 
     if not only_hv_sp:
@@ -106,7 +124,7 @@ def visualize(rollout_logs, logsdir, cur_step, only_hv_sp=False, infos={}):
             rollout_ratio[:, 0],
             label="MODT",
             facecolors=face_colors,
-            edgecolors=edge_colors,
+            edgecolors=pref_edge_colors,
         )
         axes[cur_ax].axvline(
             x=dataset_min_prefs[0],
@@ -137,7 +155,7 @@ def visualize(rollout_logs, logsdir, cur_step, only_hv_sp=False, infos={}):
             rollout_ratio[:, 1],
             label="MODT",
             facecolors=face_colors,
-            edgecolors=edge_colors,
+            edgecolors=pref_edge_colors,
         )
         axes[cur_ax].axvline(
             x=dataset_min_prefs[1],
@@ -170,7 +188,7 @@ def visualize(rollout_logs, logsdir, cur_step, only_hv_sp=False, infos={}):
                 rollout_ratio[:, 2],
                 label="MODT",
                 facecolors=face_colors,
-                edgecolors=edge_colors,
+                edgecolors=pref_edge_colors,
             )
             axes[cur_ax].axvline(
                 x=dataset_min_prefs[2],
@@ -195,7 +213,61 @@ def visualize(rollout_logs, logsdir, cur_step, only_hv_sp=False, infos={}):
             axes[cur_ax].plot(lims, lims, label="oracle", alpha=0.75, zorder=0)
             axes[cur_ax].legend(loc="upper left")
             cur_ax += 1
-
+            
+        return_edge_colors = pref_edge_colors
+        # [?] may not reasonable
+        # return_edge_colors = deepcopy(edge_colors)
+        # if draw_ood:
+        #     # with open(infos['datapath'], 'rb') as f:
+        #     #     trajectories = pickle.load(f)
+        #     returns = [] # unweighted
+        #     for traj in trajectories:
+        #         returns.append(list(np.multiply(np.sum(traj['raw_rewards'], axis=0), traj['preference'][0])))
+        #     returns = np.array(returns)
+            
+        #     for i, t_ret in enumerate(target_returns):
+        #         min_dist = np.min(np.sum(np.abs(t_ret - returns), axis=1))
+        #         if min_dist > infos['ret_eps']:
+        #             if return_edge_colors[i] == 'r':
+        #                 return_edge_colors[i] = 'y' # Color(y) = Color(r) + Color(g)
+        #             else: # 'b'
+        #                 return_edge_colors[i] = 'g'
+        
+        # obj0 vs obj1, unweighted
+        # if n_obj == 2:
+        #     axes[cur_ax].scatter(
+        #         rollout_original_raw_r[:, 0],
+        #         rollout_original_raw_r[:, 1],
+        #         label=f"hv: {hv:.3e}\npts: {n_points}\nsp: {np.round(sparsity, 2)}",
+        #         facecolors=face_colors,
+        #         edgecolors=return_edge_colors,
+        #     )
+        #     axes[cur_ax].set_xlim([0, max(rollout_original_raw_r[:, 0]) * 1.05])
+        #     axes[cur_ax].set_ylim([0, max(rollout_original_raw_r[:, 1]) * 1.05])
+        #     axes[cur_ax].set_title(f"Obj 0 vs Obj 1")
+        #     axes[cur_ax].set(xlabel="Obj 0", ylabel="Obj 1")
+        #     axes[cur_ax].legend(loc="lower right")
+        #     cur_ax += 1
+        # # change to 3d pareto front
+        # elif n_obj == 3:
+        #     axes[cur_ax].remove()
+        #     axes[cur_ax] = fig.add_subplot(n_obj, 3, cur_ax + 1, projection="3d")
+        #     axes[cur_ax].scatter(
+        #         rollout_original_raw_r[:, 0],
+        #         rollout_original_raw_r[:, 1],
+        #         rollout_original_raw_r[:, 2],
+        #         label=f"hv: {hv:.3e}\npts: {n_points}\nsp: {np.round(sparsity, 2)}",
+        #         facecolors=face_colors,
+        #         edgecolors=return_edge_colors,
+        #     )
+        #     axes[cur_ax].set_xlim3d([0, max(rollout_original_raw_r[:, 0]) * 1.05])
+        #     axes[cur_ax].set_ylim3d([0, max(rollout_original_raw_r[:, 1]) * 1.05])
+        #     axes[cur_ax].set_zlim3d([0, max(rollout_original_raw_r[:, 2]) * 1.05])
+        #     axes[cur_ax].set_title(f"Obj 1 vs. Obj 2 vs. Obj 3")
+        #     axes[cur_ax].set(xlabel="Obj 1", ylabel="Obj 2", zlabel="Obj 3")
+        #     axes[cur_ax].legend(loc="lower right")
+        #     cur_ax += 1
+        
         # rtg0 vs return0, rtg1 vs return1, ... (all are weighted)
 
         using_mo_rtg = False if len(target_returns.shape) == 1 else True
@@ -204,7 +276,7 @@ def visualize(rollout_logs, logsdir, cur_step, only_hv_sp=False, infos={}):
                 target_returns[:, 0],
                 rollout_weighted_raw_r[:, 0],
                 facecolors=face_colors,
-                edgecolors=edge_colors,
+                edgecolors=return_edge_colors,
                 label="MODT",
             )
             axes[cur_ax].set_xlim([-5, np.max(target_returns[:, 0]) * 1.05])
@@ -235,7 +307,7 @@ def visualize(rollout_logs, logsdir, cur_step, only_hv_sp=False, infos={}):
                 target_returns[:, 1],
                 rollout_weighted_raw_r[:, 1],
                 facecolors=face_colors,
-                edgecolors=edge_colors,
+                edgecolors=return_edge_colors,
                 label="MODT",
             )
             axes[cur_ax].set_xlim([-5, np.max(target_returns[:, 1]) * 1.05])
@@ -268,7 +340,7 @@ def visualize(rollout_logs, logsdir, cur_step, only_hv_sp=False, infos={}):
                     target_returns[:, 2],
                     rollout_weighted_raw_r[:, 2],
                     facecolors=face_colors,
-                    edgecolors=edge_colors,
+                    edgecolors=return_edge_colors,
                     label="MODT",
                 )
                 axes[cur_ax].set_xlim([-5, np.max(target_returns[:, 2]) * 1.05])
@@ -301,7 +373,7 @@ def visualize(rollout_logs, logsdir, cur_step, only_hv_sp=False, infos={}):
                 target_returns,
                 rollout_final_r,
                 facecolors=face_colors,
-                edgecolors=edge_colors,
+                edgecolors=return_edge_colors,
                 label="MODT",
             )
             axes[cur_ax].set_xlim([-5, np.max(target_returns) * 1.05])
@@ -346,7 +418,7 @@ def visualize(rollout_logs, logsdir, cur_step, only_hv_sp=False, infos={}):
         pass
 
 
-def cal_from_data(
+def cal_behavior_from_data(
     datasets=["expert_wide"], env_name="MO-Hopper-v2", num_traj=50000, num_plot=1000, data_path="data_collected"
 ):
     assert num_traj >= num_plot
@@ -435,7 +507,7 @@ def cal_from_data(
     visualize(rlogs, "./experiment_runs/behavior", 0, only_hv_sp=True, infos=infos)
 
 
-def cal_all():
+def cal_all_behavior():
     for env in ['MO-Ant-v2', 'MO-HalfCheetah-v2', 'MO-Hopper-v2', 'MO-Hopper-v3', 'MO-Swimmer-v2', 'MO-Walker2d-v2']:
         for policy in ["expert", "amateur"]:
             for dist in ["narrow", "uniform", "wide", "custom"]:
@@ -443,13 +515,54 @@ def cal_all():
                 num_traj, num_plot = 50000, 1000
                 print(f"cal: {env}_{dataset}_{num_traj} use {num_plot} samples...")
                 try:
-                    cal_from_data([dataset], env)
+                    cal_behavior_from_data([dataset], env)
                 except:
                     print("error.")
 
+def visu_rollout(logspath='all/dt/normal', env_name='MO-Ant-v2', dataset='expert_custom', seed=1, step=10000, num_traj=50000):
+    logsdir = f'experiment_runs/{logspath}/{env_name}/{dataset}/{seed}/logs/step={step}_rollout.pkl'
+    with open(logsdir, 'rb') as f:
+        rollout_logs = pickle.load(f)
+    savedir = f'experiment_runs/{logspath}/{env_name}/{dataset}/{seed}/logs/ood/'
+    if dataset.endswith('custom'):
+            if env_name == 'MO-Hopper-v3':
+                hole = HOLES_v3
+            else:
+                hole = HOLES
+            dataset += f'_{hole}'
+            print(dataset)
+    datapath = f'data_generation/data_collected/{env_name}/{env_name}_{num_traj}_new{dataset}.pkl'
+    infos = {
+        "env": env_name,
+        "dataset": dataset,
+        "num_traj": num_traj,
+        'datapath': datapath,
+        'eps': 0.02,
+        'ret_eps': 50,
+    }
+    visualize(rollout_logs, savedir, step, infos=infos, draw_ood=True) # allows eps/2 error
+    print(f'saved to {savedir}')
+    
+
 import argparse
 if __name__ == "__main__":
-    cal_all()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--logspath', type=str, default='all/dt/normal')
+    parser.add_argument('--env_name', type=str, default='MO-Swimmer-v2')
+    parser.add_argument('--collect_type', type=str, default="expert")
+    # narrow, wide, uniform, custom
+    parser.add_argument('--preference_type', type=str, default="custom")
+    parser.add_argument('--seed', type=int, default=1)
+    parser.add_argument('--step', type=int, default=260000)
+    parser.add_argument('--num_traj', type=int, default=50000)
+    args = parser.parse_args()
+    
+    dataset = f"{args.collect_type}_{args.preference_type}"
+    
+    visu_rollout(logspath=args.logspath, env_name=args.env_name, dataset=dataset, seed=args.seed, step=args.step, num_traj=args.num_traj)
+    
+    
+    # cal_all_behavior()
     
     # parser = argparse.ArgumentParser()
     # parser.add_argument('--env_name', type=str, default='MO-Hopper-v2')

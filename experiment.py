@@ -455,6 +455,7 @@ def experiment(
         concat_act_pref=concat_act_pref,
         logsdir=logsdir,
         use_p_bar=use_p_bar,
+        datapath=dataset_paths[0], # currently only support drawing ood prefs of one dataset
     )
     
     for iter in range(max_iters):
@@ -534,11 +535,11 @@ if __name__ == '__main__':
     parser.add_argument('--use_p_bar', type=bool, default=True)
     parser.add_argument('--conservative_q', type=int, default=3)
     # MODiffuser configs
-    parser.add_argument('--mod_type', type=str, default='bc') # bc, dd, dt, td
-    parser.add_argument('--mod_eval_gran', type=int, default=50) # for fewer evaluation time
+    parser.add_argument('--mod_type', type=str, default='bc') # bc, dd, dt
+    parser.add_argument('--mod_eval_gran', type=int, default=100) # for fewer evaluation time
     parser.add_argument('--infer_N', type=int, default=0) # traj_gen = tau_{t-M+1:t} (M cond) ## tau_{t+1:t+N} (N infer); notice a_hat = a_t
-    parser.add_argument('--n_diffusion_steps', type=int, default=20)
-    parser.add_argument('--returns_condition', type=bool, default=False)
+    parser.add_argument('--n_diffusion_steps', type=int, default=10)
+    parser.add_argument('--returns_condition', type=bool, default=False) # if want to set False, just not use this option
     parser.add_argument('--diffuser_sample_verbose', type=bool, default=False)
     
     parser.add_argument('--remark', type=str, default=None)
