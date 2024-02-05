@@ -47,7 +47,7 @@ def visualize(rollout_logs, logsdir, cur_step, only_hv_sp=False, infos={}, draw_
         
         for i, t_pref in enumerate(target_prefs):
             min_dist = np.min(np.sum(np.abs(t_pref - prefs), axis=1))
-            if min_dist > infos['eps']:
+            if min_dist > infos['eps']: # TODO inter- and extrapolation class
                 if pref_edge_colors[i] == 'r':
                     pref_edge_colors[i] = 'y' # Color(y) = Color(r) + Color(g)
                 else:
@@ -546,34 +546,34 @@ def visu_rollout(logspath='all/dt/normal', env_name='MO-Ant-v2', dataset='expert
 
 import argparse
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--logspath', type=str, default='all/dt/normal')
-    parser.add_argument('--env_name', type=str, default='MO-Swimmer-v2')
-    parser.add_argument('--collect_type', type=str, default="expert")
-    # narrow, wide, uniform, custom
-    parser.add_argument('--preference_type', type=str, default="custom")
-    parser.add_argument('--seed', type=int, default=1)
-    parser.add_argument('--step', type=int, default=260000)
-    parser.add_argument('--num_traj', type=int, default=50000)
-    args = parser.parse_args()
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument('--logspath', type=str, default='all/dt/normal')
+    # parser.add_argument('--env_name', type=str, default='MO-Swimmer-v2')
+    # parser.add_argument('--collect_type', type=str, default="expert")
+    # # narrow, wide, uniform, custom
+    # parser.add_argument('--preference_type', type=str, default="custom")
+    # parser.add_argument('--seed', type=int, default=1)
+    # parser.add_argument('--step', type=int, default=260000)
+    # parser.add_argument('--num_traj', type=int, default=50000)
+    # args = parser.parse_args()
     
-    dataset = f"{args.collect_type}_{args.preference_type}"
+    # dataset = f"{args.collect_type}_{args.preference_type}"
     
-    visu_rollout(logspath=args.logspath, env_name=args.env_name, dataset=dataset, seed=args.seed, step=args.step, num_traj=args.num_traj)
+    # visu_rollout(logspath=args.logspath, env_name=args.env_name, dataset=dataset, seed=args.seed, step=args.step, num_traj=args.num_traj)
     
     
     # cal_all_behavior()
     
-    # parser = argparse.ArgumentParser()
-    # parser.add_argument('--env_name', type=str, default='MO-Hopper-v2')
-    # parser.add_argument('--collect_type', type=str, default="expert")
-    # # narrow, wide, uniform, custom
-    # parser.add_argument('--preference_type', type=str, default="custom")
-    # parser.add_argument('--num_traj', type=int, default=10000)
-    # parser.add_argument('--num_plot', type=int, default=1000)
-    # parser.add_argument('--data_path', type=str, default="data_collected")
-    # parser.add_argument('--p_bar', type=bool, default=False)
-    # args = parser.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--env_name', type=str, default='MO-Hopper-v2')
+    parser.add_argument('--collect_type', type=str, default="expert")
+    # narrow, wide, uniform, custom
+    parser.add_argument('--preference_type', type=str, default="custom")
+    parser.add_argument('--num_traj', type=int, default=50000)
+    parser.add_argument('--num_plot', type=int, default=1000)
+    parser.add_argument('--data_path', type=str, default="data_collected")
+    parser.add_argument('--p_bar', type=bool, default=False)
+    args = parser.parse_args()
     
-    # dataset = f"{args.collect_type}_{args.preference_type}"
-    # cal_from_data(datasets=[dataset], env_name=args.env_name, num_traj=args.num_traj, num_plot=args.num_plot, data_path=args.data_path)
+    dataset = f"{args.collect_type}_{args.preference_type}"
+    cal_behavior_from_data(datasets=[dataset], env_name=args.env_name, num_traj=args.num_traj, num_plot=args.num_plot, data_path=args.data_path)
