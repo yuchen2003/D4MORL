@@ -111,7 +111,7 @@ class TemporalUnet(nn.Module):
         self,
         horizon,
         transition_dim,
-        cond_dim,
+        cond_dim, # e.g., rtg_dim + pref_dim
         rtg_dim,
         dim=128,
         dim_mults=(1, 2, 4, 8),
@@ -150,7 +150,7 @@ class TemporalUnet(nn.Module):
 
         if self.returns_condition:
             self.returns_mlp = nn.Sequential(
-                        nn.Linear(self.rtg_dim, dim),
+                        nn.Linear(cond_dim, dim),
                         act_fn,
                         nn.Linear(dim, dim * 4),
                         act_fn,

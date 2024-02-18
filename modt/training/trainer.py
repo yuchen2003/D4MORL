@@ -133,9 +133,9 @@ class Trainer:
         "num_traj": 'unspecified',
         'datapath': self.datapath,
         'eps': 0.02,
-        'ret_eps': 20,
+        'is_custom': False, # not distinguish whether or not in the hole
         }
-        visualize(rollout_logs, self.logsdir, cur_step, infos={'datapath': self.datapath, 'eps': 0.02}, draw_ood=True)
+        visualize(rollout_logs, self.logsdir, cur_step, infos=infos, draw_ood=True)
         
         if not self.eval_only:
             cur_step = (ep+1) * self.n_steps_per_iter

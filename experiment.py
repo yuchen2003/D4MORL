@@ -79,12 +79,17 @@ def experiment(
     cons_q = variant['conservative_q']
     returns_condition = variant['returns_condition']
     
+    tens = torch.zeros(1, device='cuda')
+    print(tens)
+    
     if model_type == 'mod':
         mod_type = variant['mod_type']
-        granularity = variant['mod_eval_gran'] # TODO may modify hyperparam to make eval faster, and then this is not further needed
-        infer_N = variant['infer_N'] # >= 0
+        granularity = variant['mod_eval_gran']
+        infer_N = variant['infer_N'] # >= 0, may cond on future states
         cond_M = K - infer_N
         assert cond_M >= 1 # when cond_M == 1, use no traj context (except for current state)
+        condition_guidance_w = variant['v_cfg_w']
+        concat_on = variant['concat_on']
         mod_verbose = variant['diffuser_sample_verbose']
     
     # Model, Trainer, Evaluator
@@ -105,7 +110,7 @@ def experiment(
         from modt.training.cql_trainer import CQLTrainer as Trainer
         from modt.evaluation.evaluator_cql import EvaluatorCQL as Evaluator
         from modt.models.cql import CQLModel as Model
-    elif model_type[:3] == 'mod':
+    elif model_type == 'mod':
         from mod.trainer import DiffuserTrainer as Trainer
         from mod.evaluator import EvaluatorMOD as Evaluator
         from mod.model import MODiffuser as Model
@@ -116,6 +121,7 @@ def experiment(
             savepath: str = run_name + '/'
             horizon: int = K
             n_diffusion_steps:int = variant['n_diffusion_steps']
+            learning_rate = variant['learning_rate']
             
         diffuser_args = Parser().parse_args("mo_diffusion")
         if mod_type == 'dd':
@@ -189,7 +195,7 @@ def experiment(
         returns_mo.append(traj['raw_rewards'].sum(axis=0))
         preferences.append(traj['preference'][0, :])
     
-    # padding a few (~34/50000) state trajs with 0 to be as long as others.
+    # padding state trajs with 0 to be as long as the maxs.
     traj_max_len = np.max([len(s) for s in states])
     for i, s in enumerate(states):
         if len(s) < traj_max_len:
@@ -214,7 +220,6 @@ def experiment(
     state_mean = np.concatenate((state_mean, np.zeros(concat_state_pref * pref_dim)))
     state_std = np.concatenate((state_std, np.ones(concat_state_pref * pref_dim)))
     state_dim += pref_dim * concat_state_pref
-        
     
     lrModels = [LinearRegression() for _ in range(pref_dim)]
     for obj, lrModel in enumerate(lrModels):
@@ -268,6 +273,14 @@ def experiment(
     if not os.path.exists(video_dir):
         os.makedirs(video_dir)
         
+    if eval_only:
+        del trajectories
+        del states
+        del traj_lens
+        del preferences
+        del get_batch
+        get_batch = None
+    
     evaluator = Evaluator(
         env_name, state_dim, act_dim, pref_dim, rtg_dim,
         max_ep_len=max_ep_len,
@@ -373,23 +386,21 @@ def experiment(
             eval_context_length=eval_context_length,
             max_ep_len=max_ep_len,
             act_scale=torch.from_numpy(np.array(env.action_space.high)),
+            scale=scale,
             use_pref=variant['use_pref_predict_action'],
             concat_state_pref=concat_state_pref,
             concat_act_pref=concat_act_pref,
             concat_rtg_pref=concat_rtg_pref,
-            n_layer=variant['n_layer'],
-            n_head=variant['n_head'],
-            n_inner=4*variant['embed_dim'],
-            n_positions=1024,
-            resid_pdrop=variant['dropout'],
-            attn_pdrop=variant['dropout'],
             diffuser_args=diffuser_args,
             mod_type=mod_type,
             infer_N=infer_N,
             cond_M=cond_M,
             batch_size=batch_size,
             returns_condition=returns_condition,
+            condition_guidance_w=condition_guidance_w,
+            concat_on=concat_on,
             verbose=mod_verbose,
+            warmup_steps=warmup_steps,
         )
         
     if model_type not in ['cql', 'mod']:
@@ -505,7 +516,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_head', type=int, default=1) # lamb's default should be 4
     parser.add_argument('--activation_function', type=str, default='relu')
     parser.add_argument('--dropout', type=float, default=0.1)
-    parser.add_argument('--learning_rate', '-lr', type=float, default=1e-4)
+    parser.add_argument('--learning_rate', '-lr', type=float, default=2e-4) # just for mod
     parser.add_argument('--weight_decay', '-wd', type=float, default=1e-3)
     parser.add_argument('--warmup_steps', type=int, default=10000)
     parser.add_argument('--num_eval_episodes', type=int, default=1)
@@ -540,9 +551,10 @@ if __name__ == '__main__':
     parser.add_argument('--infer_N', type=int, default=0) # traj_gen = tau_{t-M+1:t} (M cond) ## tau_{t+1:t+N} (N infer); notice a_hat = a_t
     parser.add_argument('--n_diffusion_steps', type=int, default=10)
     parser.add_argument('--returns_condition', type=bool, default=False) # if want to set False, just not use this option
+    parser.add_argument('--v_cfg_w', type=float, default=0.1)
+    parser.add_argument('--concat_on', type=str, default='r') # g, r
     parser.add_argument('--diffuser_sample_verbose', type=bool, default=False)
     
-    parser.add_argument('--remark', type=str, default=None)
     args = parser.parse_args()
     
     seed = args.seed if args.seed is not None else np.random.randint(0, 100000)
@@ -556,8 +568,6 @@ if __name__ == '__main__':
         typ = 'normal'
     if args.model_type == 'mod':
         typ += f'/{args.mod_type}'
-    if args.remark is not None:
-        args.dir += f'/{args.remark}'
         
     args.run_name = f"{args.dir}/{args.model_type}/{typ}/{args.env}/{dataset_name}/{args.seed}"
         

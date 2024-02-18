@@ -6,7 +6,6 @@ from collections import defaultdict
 
 
 class EvaluatorMOD(Evaluator):
-
     def __call__(self, model, target_return, target_pref, cur_step):
 
         model.eval()
@@ -36,6 +35,8 @@ class EvaluatorMOD(Evaluator):
 
             actions = torch.zeros(
                 (0, self.act_dim), device=self.device, dtype=torch.float32)
+            rewards = torch.zeros(
+                (0, self.rtg_dim), device=self.device, dtype=torch.float32)
             # prefs = torch.zeros((0, self.pref_dim), device=self.device, dtype=torch.float32)
 
             # prefs_to_go = torch.from_numpy(target_pref).to(device=self.device, dtype=torch.float32).reshape(1, self.pref_dim)
@@ -45,7 +46,7 @@ class EvaluatorMOD(Evaluator):
             prefs = pref_tensor
 
             target_return = torch.tensor(
-                target_return, device=self.device, dtype=torch.float32).reshape(1, self.rtg_dim)
+                target_return, device=self.device, dtype=torch.float32).unsqueeze(0)
             timesteps = torch.tensor(
                 0, device=self.device, dtype=torch.long).reshape(1, 1)
 
@@ -61,6 +62,7 @@ class EvaluatorMOD(Evaluator):
                 # add padding
                 actions = torch.cat([actions, torch.zeros(
                     (1, self.act_dim), device=self.device)], dim=0)
+                # rewards = torch.cat([rewards, torch.ones((1, self.rtg_dim), device=self.device)], dim=0)
 
                 action = model.get_action(
                     states.to(dtype=torch.float32),
@@ -68,13 +70,14 @@ class EvaluatorMOD(Evaluator):
                     target_return.to(dtype=torch.float32),
                     prefs.to(dtype=torch.float32),
                     timesteps.to(dtype=torch.long),
+                    torch.tensor(self.max_each_obj_step, device=self.device, dtype=torch.float32),
                 )
                 actions[-1] = action
                 action = action.detach().cpu().numpy()
                 action = np.multiply(action, self.act_scale)
 
                 state_np, _, done, info = self.eval_env.step(action)
-
+                
                 # eval: for return, don't process any data, NO clipping, NO rewriting, etc.
                 # model: for auto-reg rollout, process data
                 if self.normalize_reward:
@@ -86,6 +89,7 @@ class EvaluatorMOD(Evaluator):
                     unweighted_raw_reward_eval = info['obj'] / self.scale
                     unweighted_raw_reward_model = info['obj'] / self.scale
 
+                # rewards[-1] = torch.tensor(unweighted_raw_reward_eval, device=self.device, dtype=torch.float32)
                 cum_r_original += info['obj']
 
                 final_reward_eval = np.dot(

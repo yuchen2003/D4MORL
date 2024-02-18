@@ -26,6 +26,12 @@ def visualize(rollout_logs, logsdir, cur_step, only_hv_sp=False, infos={}, draw_
     rollout_unweighted_raw_r = rollout_logs["rollout_unweighted_raw_r"]
     rollout_weighted_raw_r = rollout_logs["rollout_weighted_raw_r"]
     rollout_original_raw_r = rollout_logs["rollout_original_raw_r"]
+    
+    if n_obj == 3:
+        hole = HOLES_v3
+    else:
+        hole = HOLES
+    rejecthole = RejectHole(*hole)
 
     indices_wanted = undominated_indices(rollout_unweighted_raw_r, tolerance=0.05)
     n_points = len(indices_wanted)
@@ -47,11 +53,18 @@ def visualize(rollout_logs, logsdir, cur_step, only_hv_sp=False, infos={}, draw_
         
         for i, t_pref in enumerate(target_prefs):
             min_dist = np.min(np.sum(np.abs(t_pref - prefs), axis=1))
-            if min_dist > infos['eps']: # TODO inter- and extrapolation class
-                if pref_edge_colors[i] == 'r':
-                    pref_edge_colors[i] = 'y' # Color(y) = Color(r) + Color(g)
+            if min_dist > infos['eps']: # ood
+                if infos['is_custom'] == True and t_pref in rejecthole:
+                    if pref_edge_colors[i] == 'r':
+                        pref_edge_colors[i] = 'm'
+                    else:
+                        pref_edge_colors[i] = 'c' # cyan ~ blue, magenta ~ red
                 else:
-                    pref_edge_colors[i] = 'g'
+                    if pref_edge_colors[i] == 'r':
+                        pref_edge_colors[i] = 'y' # Color(y) = Color(r) + Color(g)
+                    else:
+                        pref_edge_colors[i] = 'g'
+                
 
     hv = compute_hypervolume(
         rollout_original_raw_r
@@ -423,6 +436,7 @@ def cal_behavior_from_data(
 ):
     assert num_traj >= num_plot
     generation_path = f"data_generation/{data_path}"
+    is_custom = False # note this only support one dataset (not multiple custom or not custom mixed)
     for i, d in enumerate(datasets):
         if d.endswith('custom'):
             if env_name == 'MO-Hopper-v3':
@@ -430,6 +444,7 @@ def cal_behavior_from_data(
             else:
                 hole = HOLES
             datasets[i] += f'_{hole}'
+            is_custom = True
             print(datasets[i])
     dataset_paths = [
         f"{generation_path}/{env_name}/{env_name}_{num_traj}_new{d}.pkl"
@@ -502,6 +517,7 @@ def cal_behavior_from_data(
         "env": env_name,
         "dataset": datasets[0],  # currently use only one dataset
         "num_traj": num_traj,
+        "is_custom": is_custom,
     }
 
     visualize(rlogs, "./experiment_runs/behavior", 0, only_hv_sp=True, infos=infos)
@@ -519,23 +535,26 @@ def cal_all_behavior():
                 except:
                     print("error.")
 
-def visu_rollout(logspath='all/dt/normal', env_name='MO-Ant-v2', dataset='expert_custom', seed=1, step=10000, num_traj=50000):
-    logsdir = f'experiment_runs/{logspath}/{env_name}/{dataset}/{seed}/logs/step={step}_rollout.pkl'
+def visu_rollout(dir='experiment_runs/all/dt/normal/MO-Ant-v2/expert_custom/1/logs', model_type='dt', concat_type='normal', env_name='MO-Ant-v2', dataset='expert_custom', seed=1, logs='logs', step=10000, num_traj=50000):
+    logsdir = f'{dir}/step={step}_rollout.pkl'
     with open(logsdir, 'rb') as f:
         rollout_logs = pickle.load(f)
-    savedir = f'experiment_runs/{logspath}/{env_name}/{dataset}/{seed}/logs/ood/'
+    savedir = f'{dir}/ood/'
+    is_custom = False
     if dataset.endswith('custom'):
-            if env_name == 'MO-Hopper-v3':
-                hole = HOLES_v3
-            else:
-                hole = HOLES
-            dataset += f'_{hole}'
-            print(dataset)
+        if env_name == 'MO-Hopper-v3':
+            hole = HOLES_v3
+        else:
+            hole = HOLES
+        dataset += f'_{hole}'
+        is_custom = True
+        print(dataset)
     datapath = f'data_generation/data_collected/{env_name}/{env_name}_{num_traj}_new{dataset}.pkl'
     infos = {
         "env": env_name,
         "dataset": dataset,
         "num_traj": num_traj,
+        'is_custom': is_custom,
         'datapath': datapath,
         'eps': 0.02,
         'ret_eps': 50,
@@ -543,30 +562,37 @@ def visu_rollout(logspath='all/dt/normal', env_name='MO-Ant-v2', dataset='expert
     visualize(rollout_logs, savedir, step, infos=infos, draw_ood=True) # allows eps/2 error
     print(f'saved to {savedir}')
     
+# TODO visu all rollout
+def visu_all_rollout(dir):
+    ''' Recursively find all *.pkl '''
+    len_dir = len(dir)
+    len1, len2 = len('step='), len('_rollout.pkl')
+    for root, dirs, files in os.walk(dir):
+        # print(root, dirs, files)
+        for f_str in files:
+            if f_str.endswith('rollout.pkl'):
+                configs = root[len_dir + 1 : ].split('/')[-6:]
+                print(configs)
+                step_str = f_str[len1 : -len2]
+                visu_rollout(root, *configs, step=step_str)
+    print('***end.***')
 
 import argparse
 if __name__ == "__main__":
+    ### visualize all rollout under some dir (path till .../{seed}/logs)
     # parser = argparse.ArgumentParser()
-    # parser.add_argument('--logspath', type=str, default='all/dt/normal')
-    # parser.add_argument('--env_name', type=str, default='MO-Swimmer-v2')
-    # parser.add_argument('--collect_type', type=str, default="expert")
-    # # narrow, wide, uniform, custom
-    # parser.add_argument('--preference_type', type=str, default="custom")
-    # parser.add_argument('--seed', type=int, default=1)
-    # parser.add_argument('--step', type=int, default=260000)
-    # parser.add_argument('--num_traj', type=int, default=50000)
+    # parser.add_argument('--dir', type=str, default='experiment_runs/debug')
     # args = parser.parse_args()
     
-    # dataset = f"{args.collect_type}_{args.preference_type}"
+    # visu_all_rollout(args.dir)
     
-    # visu_rollout(logspath=args.logspath, env_name=args.env_name, dataset=dataset, seed=args.seed, step=args.step, num_traj=args.num_traj)
-    
-    
+    ### plot all behavior pf
     # cal_all_behavior()
     
+    ### plot behavior pf
     parser = argparse.ArgumentParser()
     parser.add_argument('--env_name', type=str, default='MO-Hopper-v2')
-    parser.add_argument('--collect_type', type=str, default="expert")
+    parser.add_argument('--collect_type', type=str, default="amateur")
     # narrow, wide, uniform, custom
     parser.add_argument('--preference_type', type=str, default="custom")
     parser.add_argument('--num_traj', type=int, default=50000)
@@ -574,6 +600,5 @@ if __name__ == "__main__":
     parser.add_argument('--data_path', type=str, default="data_collected")
     parser.add_argument('--p_bar', type=bool, default=False)
     args = parser.parse_args()
-    
     dataset = f"{args.collect_type}_{args.preference_type}"
     cal_behavior_from_data(datasets=[dataset], env_name=args.env_name, num_traj=args.num_traj, num_plot=args.num_plot, data_path=args.data_path)

@@ -31,53 +31,52 @@ class MODiffuser(TrajectoryModel):
         eval_context_length,
         max_ep_len,
         act_scale,
+        scale,
         use_pref,
         concat_state_pref,
         concat_act_pref,
         concat_rtg_pref,
-        n_layer, # TODO simplify these
-        n_head,
-        n_inner,
-        n_positions,
-        resid_pdrop,
-        attn_pdrop,
         diffuser_args=None,
         mod_type='bc',
         infer_N=1,
         cond_M=0,
         batch_size=64,
         returns_condition=False,
+        condition_guidance_w=0.1,
+        concat_on='g', 
         verbose=False,
+        warmup_steps=10000,
     ):
         super().__init__(state_dim, act_dim, pref_dim, max_length=max_length)
 
         self.hidden_size = hidden_size
         self.use_pref = use_pref
         self.act_scale = act_scale
+        self.scale = scale
         self.concat_state_pref = concat_state_pref
         self.concat_act_pref = concat_act_pref
+        self.concat_rtg_pref = concat_rtg_pref
         self.eval_context_length = eval_context_length
         self.verbose = verbose
+        self.warmup_steps = warmup_steps
 
-        # //suppose nothing is concated in advance (this means 'concat_<state|act>_pref' has a slightly different semantic)
-        # self.state_dim = (
-        #     state_dim + concat_state_pref * pref_dim
-        # )  # already done in experiment.py
         self.state_dim = state_dim
-        self.act_dim = act_dim + concat_act_pref * pref_dim   # TODO need concat a, p
-        self.rtg_dim = pref_dim + concat_rtg_pref * pref_dim  # TODO need concat g, p
+        self.act_dim = act_dim + concat_act_pref * pref_dim   
+        self.pref_dim = pref_dim
+        self.rtg_dim = pref_dim + concat_rtg_pref * pref_dim 
+        
+        self.concat_on = concat_on 
 
         assert mod_type in DESIGNED_MOD_TYPE, f'Should set MO Diffuser type as one of {DESIGNED_MOD_TYPE}'
         self.ar_inv = False
         self.mod_type = mod_type
         if self.mod_type == 'bc':
             self.act_fn = self._bc_get_action
-            trans_dim = self.act_dim + self.state_dim # a, s (merely s may lead to low perf)
-            # self.ar_inv = True
+            trans_dim = self.act_dim + self.state_dim # a, s
         elif self.mod_type == 'dd':
             self.act_fn = self._dd_get_action
             trans_dim = self.state_dim + self.rtg_dim  # s, g (a from InvDyn)
-            self.ar_inv = True
+            # self.ar_inv = True
         elif self.mod_type == 'dt':
             self.act_fn = self._dt_get_action
             trans_dim = self.act_dim + self.state_dim + self.rtg_dim  # a, s, g
@@ -94,8 +93,8 @@ class MODiffuser(TrajectoryModel):
             savepath=(args.savepath, "model_config"),
             horizon=max_length,
             transition_dim=trans_dim,
-            dim=max_length,
-            cond_dim=0,  # not used in TemporalUnet and ValueUnet
+            dim=args.dim,
+            cond_dim=self.rtg_dim + self.rtg_dim + self.pref_dim, # weighted returns, rtg, pref(and dont use concat_rtg_pref)
             rtg_dim=self.rtg_dim,
             dim_mults=args.dim_mults,
             attention=args.attention,
@@ -107,9 +106,10 @@ class MODiffuser(TrajectoryModel):
             args.diffusion,
             savepath=(args.savepath, "diffusion_config"),
             horizon=args.horizon,
-            observation_dim=state_dim,
-            action_dim=act_dim,
-            pref_dim=pref_dim,
+            observation_dim=self.state_dim,
+            action_dim=self.act_dim,
+            pref_dim=self.pref_dim,
+            rtg_dim=self.rtg_dim,
             trans_dim=trans_dim,
             hidden_dim=hidden_size,
             mod_type=mod_type,
@@ -122,7 +122,7 @@ class MODiffuser(TrajectoryModel):
             loss_weights=args.loss_weights,
             loss_discount=args.loss_discount,
             returns_condition=returns_condition,
-            condition_guidance_w=0.1,
+            condition_guidance_w=condition_guidance_w,
             ar_inv=self.ar_inv,
             device=args.device,
         )
@@ -137,11 +137,34 @@ class MODiffuser(TrajectoryModel):
         batch_size = target_return.shape[0]
         return self.diffusion.forward(cond, batch_size, target_return, *args, **kwargs)
 
-    def get_action(self, states, actions, rtg, pref, timesteps):
+    def get_action(self, states, actions, rtg, prefs, timesteps, max_r):
         ''' Predict a_t using s_{t-N:t} and a_{t-N:t-1}, as in DMBP '''
-        target_return = torch.ones((states.shape[0], rtg.shape[-1]), dtype=torch.float32, device=rtg.device) # Maximizing traj returns
-        action = self.act_fn(states, actions, rtg, pref, timesteps, target_return)
-        return action
+        rtg = rtg[-self.max_length : ]
+        # print(prefs.shape)
+        if self.concat_on == 'r':
+            target_r = torch.ones(1, self.max_length, self.rtg_dim, device=states.device, dtype=torch.float32)
+            target_r[:, :, :self.pref_dim] = torch.multiply(max_r, target_r[:, :, :self.pref_dim])
+        elif self.concat_on == 'g':
+            target_r = torch.zeros(1, self.max_length, self.rtg_dim, device=states.device, dtype=torch.float32)
+            target_r[0, -rtg.shape[0]:, :rtg.shape[1]] = rtg
+        else:
+            raise ValueError
+        
+        target_weighted_returns = torch.multiply(max_r, prefs[-1]) / self.scale # == ones x pref, size==(bs, rtg_dim); as DD does
+        if self.concat_rtg_pref != 0:
+            target_r[:, :, -self.pref_dim:] = prefs[0]
+            target_weighted_returns = torch.cat((target_weighted_returns, torch.cat([prefs] * self.concat_rtg_pref, dim=1)), dim=1)
+        if self.concat_act_pref != 0:
+            actions = torch.cat((actions, torch.cat([prefs] * self.concat_rtg_pref, dim=1)), dim=1)
+        
+        target_r[:, :, :self.pref_dim] = target_r[:, :, :self.pref_dim] / self.scale
+        
+        guidance_terms = torch.cat([target_weighted_returns, rtg[-1], prefs[-1]], dim=-1).view(1, -1) # weighted returns, rtg, pref
+        action = self.act_fn(states, actions, target_r, prefs, timesteps, guidance_terms)
+        if self.concat_act_pref:
+            return action[ : -self.pref_dim]
+        else:
+            return action
 
     def _pad_or_clip(self, traj):
         traj_dim = traj.shape[-1]
@@ -182,7 +205,7 @@ class MODiffuser(TrajectoryModel):
 
         return conds
 
-    def _bc_get_action(self, states, actions, rtg, pref, t, target_return):
+    def _bc_get_action(self, states, actions, target_r, pref, t, target_return):
         # Preprocess
         actions = self._pad_or_clip(actions)
         states = self._pad_or_clip(states)
@@ -193,26 +216,26 @@ class MODiffuser(TrajectoryModel):
 
         return action
 
-    def _dd_get_action(self, states, actions, rtg, pref, t, target_return): # Refer DD:Alg.1
+    def _dd_get_action(self, states, actions, target_r, pref, t, target_return): # Refer DD:Alg.1
         # Preprocess
         states = self._pad_or_clip(states)
-        rtg = self._pad_or_clip(rtg)
+        target_r = self._pad_or_clip(target_r)
         
-        conds = self._make_cond(None, states, rtg)
+        conds = self._make_cond(None, states, target_r)
         traj_gen = self.forward(conds, target_return, verbose=self.verbose).trajectories
         state_traj = traj_gen[:, :, :self.state_dim]
         s_t, s_t_1 = state_traj[[-1], -2, :], state_traj[[-1], -1, :]
         s_comb_t = torch.cat([s_t, s_t_1], dim=-1)
-        action = self.diffusion.inv_model(s_comb_t)
+        action = self.diffusion.inv_model(s_comb_t)[-1]
         return action
 
-    def _dt_get_action(self, states, actions, rtg, pref, t, target_return):
+    def _dt_get_action(self, states, actions, target_r, pref, t, target_return):
         # Preprocess
         actions = self._pad_or_clip(actions)
         states = self._pad_or_clip(states)
-        rtg = self._pad_or_clip(rtg)
+        target_r = self._pad_or_clip(target_r)
         
-        conds = self._make_cond(actions, states, rtg)
+        conds = self._make_cond(actions, states, target_r)
         traj_gen = self.forward(conds, target_return, verbose=self.verbose).trajectories
         action = traj_gen[0, self.cond_M - 1, : self.act_dim]
         

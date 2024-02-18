@@ -4,6 +4,7 @@ from modt.training.trainer import Trainer
 from diffuser import utils
 from collections import namedtuple
 from copy import deepcopy
+from mod.model import MODiffuser
 
 Batch = namedtuple('Batch', 'trajs conds returns') # return can be reward or rtg
 aBatch = namedtuple('ActionBatch', 'trajs actions conds returns') # for invdyn
@@ -11,7 +12,7 @@ aBatch = namedtuple('ActionBatch', 'trajs actions conds returns') # for invdyn
 class DiffuserTrainer(Trainer):
     def __init__(
         self,
-        model,  # MODiffuser model
+        model : MODiffuser,
         optimizer,
         get_batch,
         loss_fn,
@@ -60,7 +61,7 @@ class DiffuserTrainer(Trainer):
             utils.Trainer,
             savepath=(args.savepath, 'trainer_config'),
             # train_batch_size=args.batch_size,
-            train_lr=args.learning_rate,
+            train_lr=float(args.learning_rate),
             gradient_accumulate_every=args.gradient_accumulate_every,
             ema_decay=args.ema_decay,
             sample_freq=args.sample_freq,
@@ -70,6 +71,7 @@ class DiffuserTrainer(Trainer):
             results_folder=args.savepath,
             bucket=args.bucket,
             n_reference=args.n_reference,
+            warmup_steps=self.model.warmup_steps,
         )
 
         self.trainer = trainer_config(model.diffusion)
@@ -85,14 +87,25 @@ class DiffuserTrainer(Trainer):
             
         self.infer_N = self.model.infer_N
         self.cond_M = self.model.cond_M
+        self.concat_on = self.model.concat_on
 
     def train_step(self):
-        s, a, r, g, t, mask, p = self.get_batch()
+        s, a, r, g, t, mask, p = self.get_batch() # r, g is divided by scale
         g = g[:, :-1]
-        traj_returns = r.sum(1) / r.shape[1]
+
+        traj_returns = r.sum(1) / r.shape[1] # unweighted
+        traj_weighted_returns = torch.multiply(traj_returns, p[:, 0, :])
+        
+        if self.concat_rtg_pref != 0:
+            g = torch.cat((g, torch.cat([p] * self.concat_rtg_pref, dim=2)), dim=2)
+            r = torch.cat((r, torch.cat([p] * self.concat_rtg_pref, dim=2)), dim=2)
+            traj_weighted_returns = torch.cat((traj_weighted_returns, torch.cat([p[:, 0, :]] * self.concat_rtg_pref, dim=1)), dim=1)
+        if self.concat_act_pref != 0:
+            a = torch.cat((a, torch.cat([p] * self.concat_act_pref, dim=2)), dim=2)
 
         # Prepare training batch
-        batch = self.batch_fn(s, a, r, g, t, mask, p, traj_returns)
+        guidance_term = torch.cat([traj_weighted_returns, g[:, -1, :], p[:, 0, :]], dim=-1) # weighted returns, rtg, pref
+        batch = self.batch_fn(s, a, r, g, t, mask, p, guidance_term)
 
         # Invoke diffusion trainer
         loss, infos = self.trainer.train(1, batch)
@@ -109,12 +122,27 @@ class DiffuserTrainer(Trainer):
         return Batch(trajs=as_trajs, conds=conds, returns=traj_r)
 
     def _dd_get_batch(self, s, a, r, g, t, mask, p, traj_r):
-        sg_trajs = torch.cat([s, r], dim=-1)
-        conds = self.diffuser._make_cond(None, s, r)
+        if self.concat_on == 'r':
+            sg_trajs = torch.cat([s, r], dim=-1)
+            conds = self.diffuser._make_cond(None, s, r)
+        elif self.concat_on == 'g':
+            sg_trajs = torch.cat([s, g], dim=-1)
+            conds = self.diffuser._make_cond(None, s, g)
+        elif self.concat_on == 's':
+            sg_trajs = s
+            conds = self.diffuser._make_cond(None, s, None) # as that in DD
+        else:
+            raise ValueError
         return aBatch(trajs=sg_trajs, actions=a, conds=conds, returns=traj_r)
 
     def _dt_get_batch(self, s, a, r, g, t, mask, p, traj_r):
-        asg_trajs = torch.cat([a, s, r], dim=-1)
-        conds = self.diffuser._make_cond(a, s, r)
+        if self.concat_on == 'r':
+            asg_trajs = torch.cat([a, s, r], dim=-1)
+            conds = self.diffuser._make_cond(a, s, r)
+        elif self.concat_on == 'g':
+            asg_trajs = torch.cat([a, s, g], dim=-1)
+            conds = self.diffuser._make_cond(a, s, g)
+        else:
+            raise ValueError
         return Batch(trajs=asg_trajs, conds=conds, returns=traj_r)
 

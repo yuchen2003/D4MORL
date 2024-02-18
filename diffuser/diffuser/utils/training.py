@@ -40,11 +40,11 @@ class Trainer(object):
         # renderer,
         ema_decay=0.995,
         # train_batch_size=32,
-        train_lr=2e-5,
+        train_lr=2e-4,
         gradient_accumulate_every=2,
         step_start_ema=2000,
         update_ema_every=10,
-        log_freq=100,
+        log_freq=1000,
         sample_freq=1000,
         save_freq=1000,
         label_freq=100000,
@@ -52,6 +52,7 @@ class Trainer(object):
         results_folder='./diffuser_results',
         n_reference=8,
         bucket=None,
+        warmup_steps=10000,
     ):
         super().__init__()
         self.model = diffusion_model
@@ -77,7 +78,10 @@ class Trainer(object):
         #     self.dataset, batch_size=1, num_workers=0, shuffle=True, pin_memory=True
         # ))
         # self.renderer = renderer
-        self.optimizer = torch.optim.Adam(diffusion_model.parameters(), lr=train_lr)
+        self.optimizer = torch.optim.AdamW(diffusion_model.parameters(), lr=train_lr)
+        self.scheduler = torch.optim.lr_scheduler.LambdaLR(
+            self.optimizer, lambda steps: min((steps+1)/warmup_steps, 1)
+        )
 
         self.logdir = results_folder
         self.bucket = bucket
@@ -104,15 +108,13 @@ class Trainer(object):
         timer = Timer()
         for step in range(n_train_steps):
             for _ in range(self.gradient_accumulate_every):
-                # batch = next(self.dataloader)
-                # batch = batch_to_device(batch)
-
                 loss, infos = self.model.loss(*batch)
                 loss = loss / self.gradient_accumulate_every
                 loss.backward()
 
             self.optimizer.step()
             self.optimizer.zero_grad()
+            self.scheduler.step()
 
             if self.step % self.update_ema_every == 0:
                 self.step_ema()
