@@ -94,7 +94,7 @@ class MODiffuser(TrajectoryModel):
             horizon=max_length,
             transition_dim=trans_dim,
             dim=args.dim,
-            cond_dim=self.rtg_dim + self.rtg_dim + self.pref_dim, # weighted returns, rtg, pref(and dont use concat_rtg_pref)
+            cond_dim=self.pref_dim, # weighted returns, rtg, pref(and dont use concat_rtg_pref)
             rtg_dim=self.rtg_dim,
             dim_mults=args.dim_mults,
             attention=args.attention,
@@ -153,13 +153,13 @@ class MODiffuser(TrajectoryModel):
         target_weighted_returns = torch.multiply(max_r, prefs[-1]) / self.scale # == ones x pref, size==(bs, rtg_dim); as DD does
         if self.concat_rtg_pref != 0:
             target_r[:, :, -self.pref_dim:] = prefs[0]
-            target_weighted_returns = torch.cat((target_weighted_returns, torch.cat([prefs] * self.concat_rtg_pref, dim=1)), dim=1)
+            # target_weighted_returns = torch.cat((target_weighted_returns, torch.cat([prefs] * self.concat_rtg_pref, dim=1)), dim=1)
         if self.concat_act_pref != 0:
             actions = torch.cat((actions, torch.cat([prefs] * self.concat_rtg_pref, dim=1)), dim=1)
         
         target_r[:, :, :self.pref_dim] = target_r[:, :, :self.pref_dim] / self.scale
         
-        guidance_terms = torch.cat([target_weighted_returns, rtg[-1], prefs[-1]], dim=-1).view(1, -1) # weighted returns, rtg, pref
+        guidance_terms = torch.cat([target_weighted_returns], dim=-1).view(1, -1) # weighted returns, rtg, pref
         action = self.act_fn(states, actions, target_r, prefs, timesteps, guidance_terms)
         if self.concat_act_pref:
             return action[ : -self.pref_dim]

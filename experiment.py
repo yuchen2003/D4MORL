@@ -12,12 +12,12 @@ from gym.spaces.box import Box
 import environments # import to register environments for multi-objective
 from math import isclose
 from modt.evaluation.evaluate_episodes import EvalEpisode
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression, Lasso
 from torch import nn
 from state_norm_params import state_norm_params # we use normalization parameter for states from the behavioral policy
 import random
 import json
-from data_generation.custom_pref import HOLES, HOLES_v3, RejectHole
+from data_generation.custom_pref import HOLES, HOLES_v2, HOLES_v3, RejectHole
 
 isCloseToOne = lambda x: isclose(x, 1, rel_tol=1e-12)
 def pref_grid(n_obj, max_prefs=None, min_prefs=None, granularity=5):
@@ -84,10 +84,11 @@ def experiment(
     
     if model_type == 'mod':
         mod_type = variant['mod_type']
-        granularity = variant['mod_eval_gran']
-        infer_N = variant['infer_N'] # >= 0, may cond on future states
+        infer_N = variant['infer_N'] # >= 0, the length of traj to be infered
         cond_M = K - infer_N
-        assert cond_M >= 1 # when cond_M == 1, use no traj context (except for current state)
+        assert cond_M >= 1 and infer_N >= 0 # when cond_M == 1, use no traj context (except for current state)
+        if mod_type == 'dd':
+            assert(cond_M < K)
         condition_guidance_w = variant['v_cfg_w']
         concat_on = variant['concat_on']
         mod_verbose = variant['diffuser_sample_verbose']
@@ -164,6 +165,8 @@ def experiment(
         if d.endswith('custom'):
             if env_name == 'MO-Hopper-v3':
                 hole = HOLES_v3
+            elif env_name == 'MO-Hopper-v2':
+                hole = HOLES_v2
             else:
                 hole = HOLES
             dataset[i] += f'_{hole}'
@@ -221,12 +224,17 @@ def experiment(
     state_std = np.concatenate((state_std, np.ones(concat_state_pref * pref_dim)))
     state_dim += pref_dim * concat_state_pref
     
-    lrModels = [LinearRegression() for _ in range(pref_dim)]
+    ### NOTE: regular linear model with l2-norm gives very large |coef_|, so use lasso instead (I guess this is because pref.sum(1) == 1, but linear regression dosen't recognize this, and must make a huge effort to fit it via very large coefficients)
+    # lrModels = [LinearRegression() for _ in range(pref_dim)]
+    # for obj, lrModel in enumerate(lrModels):
+    #     lrModel.fit(preferences.reshape((-1, pref_dim)), returns_mo[:, obj])
+    # all experiments use pre-cashed expert_uniform models
+    # with open(f"lr_models/{env_name}_expert_uniform.pkl", 'rb') as f:
+    #     lrModels = pickle.load(f)
+    
+    lrModels = [Lasso() for _ in range(pref_dim)]
     for obj, lrModel in enumerate(lrModels):
         lrModel.fit(preferences.reshape((-1, pref_dim)), returns_mo[:, obj])
-    # all experiments use pre-cashed expert_uniform models
-    with open(f"lr_models/{env_name}_expert_uniform.pkl", 'rb') as f:
-        lrModels = pickle.load(f)
     
     max_prefs = np.max(preferences, axis=0)
     min_prefs = np.min(preferences, axis=0)
@@ -547,7 +555,6 @@ if __name__ == '__main__':
     parser.add_argument('--conservative_q', type=int, default=3)
     # MODiffuser configs
     parser.add_argument('--mod_type', type=str, default='bc') # bc, dd, dt
-    parser.add_argument('--mod_eval_gran', type=int, default=500) # for fewer evaluation time
     parser.add_argument('--infer_N', type=int, default=0) # traj_gen = tau_{t-M+1:t} (M cond) ## tau_{t+1:t+N} (N infer); notice a_hat = a_t
     parser.add_argument('--n_diffusion_steps', type=int, default=10)
     parser.add_argument('--returns_condition', type=bool, default=False) # if want to set False, just not use this option

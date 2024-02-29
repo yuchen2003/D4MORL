@@ -14,7 +14,7 @@ from a2c_ppo_acktr import algo
 import os
 import sys
 from morl.hypervolume import InnerHyperVolume
-from custom_pref import HOLES, HOLES_v3, RejectHole
+from custom_pref import HOLES, HOLES_v2, HOLES_v3, RejectHole
 
 def compute_hypervolume(ep_objs_batch):
     n = len(ep_objs_batch[0])
@@ -102,6 +102,8 @@ def collect_helper(args, all_datas):
     if args.preference_type == 'custom':
         if args.env_name == 'MO-Hopper-v3':
             hole = HOLES_v3
+        elif args.env_name == 'MO-Hopper-v2':
+            hole = HOLES_v2
         else:
             hole = HOLES
         args.preference_type += f'_{hole}'

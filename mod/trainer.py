@@ -99,12 +99,12 @@ class DiffuserTrainer(Trainer):
         if self.concat_rtg_pref != 0:
             g = torch.cat((g, torch.cat([p] * self.concat_rtg_pref, dim=2)), dim=2)
             r = torch.cat((r, torch.cat([p] * self.concat_rtg_pref, dim=2)), dim=2)
-            traj_weighted_returns = torch.cat((traj_weighted_returns, torch.cat([p[:, 0, :]] * self.concat_rtg_pref, dim=1)), dim=1)
+            # traj_weighted_returns = torch.cat((traj_weighted_returns, torch.cat([p[:, 0, :]] * self.concat_rtg_pref, dim=1)), dim=1)
         if self.concat_act_pref != 0:
             a = torch.cat((a, torch.cat([p] * self.concat_act_pref, dim=2)), dim=2)
 
         # Prepare training batch
-        guidance_term = torch.cat([traj_weighted_returns, g[:, -1, :], p[:, 0, :]], dim=-1) # weighted returns, rtg, pref
+        guidance_term = torch.cat([traj_weighted_returns], dim=-1) # weighted returns, rtg, pref
         batch = self.batch_fn(s, a, r, g, t, mask, p, guidance_term)
 
         # Invoke diffusion trainer

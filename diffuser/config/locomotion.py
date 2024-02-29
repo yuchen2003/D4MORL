@@ -18,51 +18,7 @@ args_to_watch = [
 logbase = 'logs'
 
 base = {
-    # 'mo_diffusion': {
-    #     ## model
-    #     'model': 'models.TemporalUnet',
-    #     'diffusion': 'models.MOGaussianDiffusion',
-    #     # 'horizon': 32,
-    #     # 'n_diffusion_steps': 20,
-    #     'action_weight': 10,
-    #     'loss_weights': None,
-    #     'loss_discount': 1,
-    #     'predict_epsilon': False,
-    #     'dim_mults': (1, 2, 4, 8),
-    #     'attention': False,
-    #     'renderer': 'utils.MuJoCoRenderer',
-
-    #     ## dataset
-    #     # 'loader': 'datasets.TrajectoryDataset',
-    #     'normalizer': 'GaussianNormalizer',
-    #     'preprocess_fns': [],
-    #     'clip_denoised': False,
-    #     'use_padding': True,
-    #     'max_path_length': 1000,
-
-    #     ## serialization
-    #     'logbase': logbase,
-    #     'prefix': 'diffusion/defaults',
-    #     'exp_name': watch(args_to_watch),
-
-    #     ## training
-    #     'loss_type': 'l2',
-    #     'n_steps_per_epoch': 10000,
-    #     'n_train_steps': 1e6, # overridded by D4MORL config
-    #     # 'batch_size': 32,
-    #     # 'learning_rate': 2e-4,
-    #     'gradient_accumulate_every': 2,
-    #     'ema_decay': 0.995,
-    #     'save_freq': 20000,
-    #     'sample_freq': 20000,
-    #     'n_saves': 5,
-    #     'save_parallel': False,
-    #     'n_reference': 8,
-    #     'bucket': None,
-    #     'device': 'cuda',
-    #     'seed': None,
-    # }
-    'mo_diffusion': { # modified according to DD
+    'mo_diffusion': {
         ## model
         'model': 'models.TemporalUnet',
         'diffusion': 'models.MOGaussianDiffusion',
@@ -72,8 +28,8 @@ base = {
         'loss_weights': None,
         'loss_discount': 1,
         'predict_epsilon': False,
-        'dim_mults': (1, 4, 8),
-        'dim': 128,
+        'dim_mults': (1, 2, 4, 8),
+        'dim': 48,
         'attention': False,
         'renderer': 'utils.MuJoCoRenderer',
 
@@ -94,8 +50,8 @@ base = {
         'loss_type': 'l2',
         'n_steps_per_epoch': 10000,
         'n_train_steps': 1e6, # overridded by D4MORL config
-        'batch_size': 32,
-        'learning_rate': 2e-4,
+        # 'batch_size': 32,
+        # 'learning_rate': 2e-4,
         'gradient_accumulate_every': 2,
         'ema_decay': 0.995,
         'save_freq': 20000,

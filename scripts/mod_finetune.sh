@@ -275,3 +275,6 @@ wait
 # eval only
 # experiment_runs/mod_impl/finetune/return_cond1/mod/normal/bc/MO-HalfCheetah-v2/expert_uniform/1/ckpt/step=160000.ckpt
 CUDA_VISIBLE_DEVICES=1 python experiment.py --dir experiment_runs/mod_impl1/eval_only --eval_only True --ckpt experiment_runs/mod_impl/finetune/return_cond1/mod/normal/bc/MO-HalfCheetah-v2/expert_uniform/1/ckpt/step=160000.ckpt --env MO-HalfCheetah-v2 --concat_state_pref 1 --concat_rtg_pref 1 --concat_act_pref 1 --seed 1 --dataset expert_uniform --model_type mod --mod_type bc --num_steps_per_iter 80000 --max_iters 5 --use_p_bar True --K 32 --n_diffusion_steps 1 --returns_condition True &
+
+# comb, all (REVERT)
+

@@ -10,7 +10,7 @@ from modt.utils import (
 )
 from copy import deepcopy
 import pickle
-from data_generation.custom_pref import HOLES, HOLES_v3, RejectHole
+from data_generation.custom_pref import HOLES, HOLES_v2, HOLES_v3, RejectHole
 
 
 def visualize(rollout_logs, logsdir, cur_step, only_hv_sp=False, infos={}, draw_ood=False):
@@ -29,6 +29,8 @@ def visualize(rollout_logs, logsdir, cur_step, only_hv_sp=False, infos={}, draw_
     
     if n_obj == 3:
         hole = HOLES_v3
+    elif 'MO-Hopper-v2' in logsdir:
+        hole = HOLES_v2
     else:
         hole = HOLES
     rejecthole = RejectHole(*hole)
@@ -441,6 +443,8 @@ def cal_behavior_from_data(
         if d.endswith('custom'):
             if env_name == 'MO-Hopper-v3':
                 hole = HOLES_v3
+            elif env_name == 'MO-Hopper-v2':
+                hole = HOLES_v2
             else:
                 hole = HOLES
             datasets[i] += f'_{hole}'
@@ -544,6 +548,8 @@ def visu_rollout(dir='experiment_runs/all/dt/normal/MO-Ant-v2/expert_custom/1/lo
     if dataset.endswith('custom'):
         if env_name == 'MO-Hopper-v3':
             hole = HOLES_v3
+        elif env_name == 'MO-Hopper-v2':
+                hole = HOLES_v2
         else:
             hole = HOLES
         dataset += f'_{hole}'
