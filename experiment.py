@@ -78,6 +78,10 @@ def experiment(
     use_p_bar = variant['use_p_bar']
     cons_q = variant['conservative_q']
     returns_condition = variant['returns_condition']
+    collect = variant['collect']
+    collect_num = variant['collect_num']
+    
+    assert ((not collect) or (model_type == 'mod' and mod_type == 'dt')), "Only use MODiffuser for data augmentation."
     
     tens = torch.zeros(1, device='cuda')
     print(tens)
@@ -115,6 +119,7 @@ def experiment(
         from mod.trainer import DiffuserTrainer as Trainer
         from mod.evaluator import EvaluatorMOD as Evaluator
         from mod.model import MODiffuser as Model
+        from mod.generate_data import DataGenerator
         from diffuser import utils
         class Parser(utils.Parser):
             config: str = "config.locomotion"
@@ -155,7 +160,7 @@ def experiment(
     pref_dim = reward_size
     rtg_dim = pref_dim if mo_rtg else 1
     scale = 100
-    max_ep_len = 500
+    max_ep_len = 500 # also dataset max_ep_len, which is defined in env description
     if not normalize_reward:
         scale *= 10
     
@@ -410,6 +415,8 @@ def experiment(
             verbose=mod_verbose,
             warmup_steps=warmup_steps,
         )
+        if collect:
+            data_generator = DataGenerator(model, collect_num, max_ep_len)
         
     if model_type not in ['cql', 'mod']:
         optimizer = Optimizer(
@@ -487,6 +494,9 @@ def experiment(
         with open(filename, 'wb') as f:
             pickle.dump(rollout_logs, f)
         
+        if collect:
+            data_generator() # TODO
+        
         if eval_only:
             break
         
@@ -511,7 +521,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--env', type=str, default='MO-Hopper-v2')
     parser.add_argument('--dataset', type=str, nargs='+', default=['expert_uniform'])
-    parser.add_argument('--num_traj', type=int, default=50000)
+    parser.add_argument('--num_traj', type=int, default=10000)
     parser.add_argument('--data_mode', type=str, default='_formal')
     parser.add_argument('--ckpt', type=str, default='')
     parser.add_argument('--mode', type=str, default='normal')  # normal for standard setting, delayed for sparse
@@ -561,6 +571,8 @@ if __name__ == '__main__':
     parser.add_argument('--v_cfg_w', type=float, default=0.1)
     parser.add_argument('--concat_on', type=str, default='r') # g, r
     parser.add_argument('--diffuser_sample_verbose', type=bool, default=False)
+    parser.add_argument('--collect', type=bool, default=False)
+    parser.add_argument('--collect_num', type=int, default=10000)
     
     args = parser.parse_args()
     

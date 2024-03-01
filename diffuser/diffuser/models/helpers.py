@@ -135,13 +135,25 @@ def extract(a, t, x_shape):
 def cosine_beta_schedule(timesteps, s=0.008, dtype=torch.float32):
     """
     cosine schedule
-    as proposed in https://openreview.net/forum?id=-NEXDKk8gZ
+    as proposed in https://openreview.net/forum?id=-NEXDKk8gZ (iDDPM)
     """
     steps = timesteps + 1
     x = np.linspace(0, steps, steps)
     alphas_cumprod = np.cos(((x / steps) + s) / (1 + s) * np.pi * 0.5) ** 2
     alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
+    betas_clipped = np.clip(betas, a_min=0, a_max=0.999)
+    return torch.tensor(betas_clipped, dtype=dtype)
+
+def VP_beta_schedule(timesteps, s=0.008, dtype=torch.float32, beta_min=0.1, beta_max=10):
+    """
+    Variance Preserving beta schedule from
+    'Zhisheng Xiao, Karsten Kreis, and Arash Vahdat. Tackling the generative learning trilemma with denoising diffusion gans. In International Conference on Learning Representations, 2022.'
+    """
+    # FIXME need check
+    steps = timesteps + 1
+    x = np.linspace(0, steps, steps)
+    betas = 1 - np.exp( - beta_min / timesteps - 0.5 * (beta_max - beta_min) * (2 * x - 1) / (timesteps ** 2) )
     betas_clipped = np.clip(betas, a_min=0, a_max=0.999)
     return torch.tensor(betas_clipped, dtype=dtype)
 

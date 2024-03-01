@@ -78,7 +78,7 @@ class Trainer(object):
         #     self.dataset, batch_size=1, num_workers=0, shuffle=True, pin_memory=True
         # ))
         # self.renderer = renderer
-        self.optimizer = torch.optim.AdamW(diffusion_model.parameters(), lr=train_lr)
+        self.optimizer = torch.optim.AdamW(diffusion_model.parameters(), lr=train_lr, weight_decay=1e-4)
         self.scheduler = torch.optim.lr_scheduler.LambdaLR(
             self.optimizer, lambda steps: min((steps+1)/warmup_steps, 1)
         )

@@ -54,7 +54,7 @@ base = {
         # 'learning_rate': 2e-4,
         'gradient_accumulate_every': 2,
         'ema_decay': 0.995,
-        'save_freq': 20000,
+        'save_freq': 1e8,
         'sample_freq': 20000,
         'n_saves': 5,
         'save_parallel': False,

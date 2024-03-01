@@ -8,6 +8,7 @@ import pdb
 import diffuser.utils as utils
 from .helpers import (
     cosine_beta_schedule,
+    VP_beta_schedule,
     extract,
     apply_conditioning,
     Losses,
@@ -43,6 +44,7 @@ def make_timesteps(batch_size, i, device):
     t = torch.full((batch_size,), i, device=device, dtype=torch.long)
     return t
 
+# Inpaint = namedtuple("InpaintConfig", "traj_start traj_end dim_start dim_end target")
 Inpaint = namedtuple("InpaintConfig", "start end target")
 
 class MOGaussianDiffusion(nn.Module):
@@ -139,9 +141,9 @@ class MOGaussianDiffusion(nn.Module):
     def _apply_inpaint_cond(self, x, conditions):
         ''' Suppose traj (x) = [a, s, g], 
         conditions={
-            "a" : Inpaint(a_start, a_end, a) | None
-            "s" : Inpaint(s_start, s_end, s) | None
-            "g" : Inpaint(g_start, g_end, g) | None
+            "a" : Inpaint(a_traj_start, a_traj_end, a_dim_start, a_dim_end, a) | None
+            "s" : Inpaint(s_traj_start, s_traj_end, s_dim_start, s_dim_end, s) | None
+            "g" : Inpaint(g_traj_start, g_traj_end, g_dim_start, g_dim_end, g) | None
         }'''
         dim_start, dim_end = 0, self.action_dim
         if conditions['a'] is not None:
