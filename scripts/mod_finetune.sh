@@ -294,3 +294,6 @@ wait
 CUDA_VISIBLE_DEVICES=0 python experiment.py --dir experiment_runs/mod_impl2/comb --env MO-Hopper-v3 --concat_state_pref 1 --concat_rtg_pref 1 --concat_act_pref 1 --seed 1 --dataset expert_uniform --model_type mod --mod_type dt --num_steps_per_iter 100000 --max_iters 4 --use_p_bar True --K 32 --n_diffusion_steps 1 --returns_condition True --granularity 50 &
 CUDA_VISIBLE_DEVICES=0 python experiment.py --dir experiment_runs/mod_impl2/comb --env MO-Hopper-v3 --concat_state_pref 1 --concat_rtg_pref 1 --concat_act_pref 1 --seed 1 --dataset expert_uniform --model_type mod --mod_type bc --num_steps_per_iter 100000 --max_iters 4 --use_p_bar True --K 32 --n_diffusion_steps 1 --returns_condition True --granularity 50 &
 wait
+
+# data synthesis
+CUDA_VISIBLE_DEVICES=0 python experiment.py --dir experiment_runs/syn --env MO-Swimmer-v2 --concat_state_pref 1 --concat_rtg_pref 1 --concat_act_pref 1 --seed 1 --dataset expert_uniform --model_type mod --mod_type dt --num_steps_per_iter 20 --max_iters 1 --use_p_bar True --K 256 --n_diffusion_steps 100 --returns_condition True --granularity 2 --collect True --collect_num 10000

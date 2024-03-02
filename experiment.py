@@ -18,6 +18,7 @@ from state_norm_params import state_norm_params # we use normalization parameter
 import random
 import json
 from data_generation.custom_pref import HOLES, HOLES_v2, HOLES_v3, RejectHole
+import time
 
 isCloseToOne = lambda x: isclose(x, 1, rel_tol=1e-12)
 def pref_grid(n_obj, max_prefs=None, min_prefs=None, granularity=5):
@@ -81,13 +82,12 @@ def experiment(
     collect = variant['collect']
     collect_num = variant['collect_num']
     
-    assert ((not collect) or (model_type == 'mod' and mod_type == 'dt')), "Only use MODiffuser for data augmentation."
-    
     tens = torch.zeros(1, device='cuda')
     print(tens)
     
     if model_type == 'mod':
         mod_type = variant['mod_type']
+        assert ((not collect) or (model_type == 'mod' and mod_type == 'dt')), "Only use MODiffuser for data augmentation."
         infer_N = variant['infer_N'] # >= 0, the length of traj to be infered
         cond_M = K - infer_N
         assert cond_M >= 1 and infer_N >= 0 # when cond_M == 1, use no traj context (except for current state)
@@ -416,8 +416,10 @@ def experiment(
             warmup_steps=warmup_steps,
         )
         if collect:
-            data_generator = DataGenerator(model, collect_num, max_ep_len)
+            data_generator = DataGenerator(model, max_each_obj_step, collect_num, max_ep_len)
         
+    optimizer = None
+    scheduler = None
     if model_type not in ['cql', 'mod']:
         optimizer = Optimizer(
             model.parameters(),
@@ -434,9 +436,9 @@ def experiment(
         scheduler = torch.optim.lr_scheduler.LambdaLR(
             optimizer, lambda steps: min((steps+1)/warmup_steps, 1)
         )
-    else:
-        optimizer = None
-        scheduler = None
+    elif model_type == 'mod':
+        if variant['ckpt'] != '':
+            model.load_model(variant['ckpt'], evaluate=eval_only)
 
     
     # default version only trains on action loss
@@ -495,7 +497,11 @@ def experiment(
             pickle.dump(rollout_logs, f)
         
         if collect:
-            data_generator() # TODO
+            gen_args = {
+                'env_name': env_name,
+                'collect_num': collect_num,
+            }
+            data_generator(prefs, gen_args)
         
         if eval_only:
             break
@@ -559,7 +565,7 @@ if __name__ == '__main__':
     parser.add_argument('--eval_context_length', type=int, default=5)
     parser.add_argument('--rtg_scale', type=float, default=1)
     parser.add_argument('--seed', type=int, default=123454321)
-    parser.add_argument('--granularity', type=int, default=500) # or 324 for hopper3d
+    parser.add_argument('--granularity', type=int, default=100) # or 324 for hopper3d
     parser.add_argument('--use_max_rtg', type=bool, default=False)
     parser.add_argument('--use_p_bar', type=bool, default=True)
     parser.add_argument('--conservative_q', type=int, default=3)
@@ -589,6 +595,8 @@ if __name__ == '__main__':
         typ += f'/{args.mod_type}'
         
     args.run_name = f"{args.dir}/{args.model_type}/{typ}/{args.env}/{dataset_name}/{args.seed}"
+    args.dir = args.run_name
+    args.run_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
         
     if not os.path.exists(args.run_name):
         os.makedirs(args.run_name)
@@ -610,5 +618,4 @@ if __name__ == '__main__':
             name=args.run_name
         )
     
-    args.dir = args.run_name
     experiment(variant=vars(args))

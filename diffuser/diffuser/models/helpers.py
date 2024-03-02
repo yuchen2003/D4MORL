@@ -163,7 +163,7 @@ def apply_conditioning(x, conditions, action_dim):
         x[:, t, action_dim:] = val.clone()
     return x
 
-Inpaint = namedtuple("InpaintConfig", "traj_start traj_end target")
+Inpaint = namedtuple("InpaintConfig", "traj_start traj_end dim_start dim_end target")
 
 #-----------------------------------------------------------------------------#
 #---------------------------------- losses -----------------------------------#

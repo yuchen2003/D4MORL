@@ -44,9 +44,6 @@ def make_timesteps(batch_size, i, device):
     t = torch.full((batch_size,), i, device=device, dtype=torch.long)
     return t
 
-# Inpaint = namedtuple("InpaintConfig", "traj_start traj_end dim_start dim_end target")
-Inpaint = namedtuple("InpaintConfig", "start end target")
-
 class MOGaussianDiffusion(nn.Module):
     def __init__(self, model, horizon, observation_dim, action_dim, pref_dim, rtg_dim, trans_dim, hidden_dim, mod_type='bc', n_timesteps=1000, loss_type='l1', clip_denoised=False, predict_epsilon=True, action_weight=1, loss_discount=1, loss_weights=None, returns_condition=False, condition_guidance_w=0.1, ar_inv=False, train_only_inv=False):
         super().__init__()
@@ -145,22 +142,11 @@ class MOGaussianDiffusion(nn.Module):
             "s" : Inpaint(s_traj_start, s_traj_end, s_dim_start, s_dim_end, s) | None
             "g" : Inpaint(g_traj_start, g_traj_end, g_dim_start, g_dim_end, g) | None
         }'''
-        dim_start, dim_end = 0, self.action_dim
-        if conditions['a'] is not None:
-            traj_start, traj_end, value = conditions['a']
-            x[:, traj_start: traj_end, dim_start: dim_end] = value[:, traj_start: traj_end, :].clone()
-            
-        dim_start = dim_end
-        dim_end += self.observation_dim
-        if conditions['s'] is not None:
-            traj_start, traj_end, value = conditions['s']
-            x[:, traj_start: traj_end, dim_start: dim_end] = value[:, traj_start: traj_end, :].clone()
-            
-        dim_start = dim_end
-        dim_end += self.rtg_dim
-        if conditions['g'] is not None:
-            traj_start, traj_end, value = conditions['g']
-            x[:, traj_start: traj_end, dim_start: dim_end] = value[:, traj_start: traj_end, :].clone()
+        
+        for term, inpaint_config in conditions.items():
+            if inpaint_config != None:
+                traj_start, traj_end, dim_start, dim_end, value = inpaint_config
+                x[:, traj_start: traj_end, dim_start: dim_end] = value[:, traj_start: traj_end, :].clone()
             
         return x
 

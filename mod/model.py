@@ -88,6 +88,8 @@ class MODiffuser(TrajectoryModel):
         self.batch_size = batch_size
 
         self.args = args = diffuser_args
+        self.device = args.device
+        
         model_config = utils.Config(
             args.model,
             savepath=(args.savepath, "model_config"),
@@ -188,18 +190,26 @@ class MODiffuser(TrajectoryModel):
 
     def _make_cond(self, a=None, s=None, g=None):
         conds = {}
+        dim_start, dim_end = 0, 0
+        
         if a is not None:
-            conds.update({'a' : Inpaint(0, self.cond_M - 1, a)})
+            dim_start = dim_end
+            dim_end += self.act_dim
+            conds.update({'a' : Inpaint(0, self.cond_M - 1, dim_start, dim_end, a)})
         else:
             conds.update({'a': None})
             
         if s is not None:
-            conds.update({'s' : Inpaint(0, self.cond_M - int(a is None), s)})
+            dim_start = dim_end
+            dim_end += self.state_dim
+            conds.update({'s' : Inpaint(0, self.cond_M - int(a is None), dim_start, dim_end, s)})
         else:
             conds.update({'s': None})
             
         if g is not None:
-            conds.update({'g' : Inpaint(0, self.cond_M, g)})
+            dim_start = dim_end
+            dim_end += self.rtg_dim
+            conds.update({'g' : Inpaint(0, self.cond_M, dim_start, dim_end, g)})
         else:
             conds.update({'g': None})
 
