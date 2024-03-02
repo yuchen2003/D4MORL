@@ -145,7 +145,7 @@ class MODiffuser(TrajectoryModel):
         # print(prefs.shape)
         if self.concat_on == 'r':
             target_r = torch.ones(1, self.max_length, self.rtg_dim, device=states.device, dtype=torch.float32)
-            target_r[:, :, :self.pref_dim] = torch.multiply(max_r, target_r[:, :, :self.pref_dim])
+            target_r[:, :, :self.pref_dim] = torch.multiply(max_r / self.scale, target_r[:, :, :self.pref_dim])
         elif self.concat_on == 'g':
             target_r = torch.zeros(1, self.max_length, self.rtg_dim, device=states.device, dtype=torch.float32)
             target_r[0, -rtg.shape[0]:, :rtg.shape[1]] = rtg
@@ -158,8 +158,6 @@ class MODiffuser(TrajectoryModel):
             # target_weighted_returns = torch.cat((target_weighted_returns, torch.cat([prefs] * self.concat_rtg_pref, dim=1)), dim=1)
         if self.concat_act_pref != 0:
             actions = torch.cat((actions, torch.cat([prefs] * self.concat_rtg_pref, dim=1)), dim=1)
-        
-        target_r[:, :, :self.pref_dim] = target_r[:, :, :self.pref_dim] / self.scale
         
         guidance_terms = torch.cat([target_weighted_returns], dim=-1).view(1, -1) # weighted returns, rtg, pref
         action = self.act_fn(states, actions, target_r, prefs, timesteps, guidance_terms)
