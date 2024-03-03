@@ -163,18 +163,17 @@ def apply_conditioning(x, conditions, action_dim):
         x[:, t, action_dim:] = val.clone()
     return x
 
-Inpaint = namedtuple("InpaintConfig", "traj_start traj_end dim_start dim_end target")
-
 #-----------------------------------------------------------------------------#
 #---------------------------------- losses -----------------------------------#
 #-----------------------------------------------------------------------------#
 
 class WeightedLoss(nn.Module):
 
-    def __init__(self, weights, action_dim):
+    def __init__(self, weights, action_dim, cond_M):
         super().__init__()
         self.register_buffer('weights', weights)
         self.action_dim = action_dim
+        self.cond_M = cond_M
 
     def forward(self, pred, targ):
         '''
@@ -183,7 +182,7 @@ class WeightedLoss(nn.Module):
         '''
         loss = self._loss(pred, targ)
         weighted_loss = (loss * self.weights).mean()
-        a0_loss = (loss[:, 0, :self.action_dim] / self.weights[0, :self.action_dim]).mean()
+        a0_loss = (loss[:, self.cond_M - 1, :self.action_dim] / self.weights[0, :self.action_dim]).mean()
         return weighted_loss, {'a0_loss': a0_loss}
 
 class WeightedStateLoss(nn.Module):

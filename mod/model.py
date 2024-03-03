@@ -6,14 +6,13 @@ import torch.nn as nn
 import transformers
 from modt.models.model import TrajectoryModel
 from diffuser import utils
-from diffuser.models import Inpaint
 
 from collections import namedtuple
 
 DESIGNED_MOD_TYPE = ['bc', 'dd', 'dt']
 
 Sample = namedtuple("Sample", "trajectories values chains")
-
+Inpaint = namedtuple("InpaintConfig", "traj_start traj_end dim_start dim_end target")
 
 class MODiffuser(TrajectoryModel):
 
@@ -108,6 +107,7 @@ class MODiffuser(TrajectoryModel):
             args.diffusion,
             savepath=(args.savepath, "diffusion_config"),
             horizon=args.horizon,
+            cond_M = self.cond_M,
             observation_dim=self.state_dim,
             action_dim=self.act_dim,
             pref_dim=self.pref_dim,
@@ -152,7 +152,7 @@ class MODiffuser(TrajectoryModel):
         else:
             raise ValueError
         
-        target_weighted_returns = torch.multiply(max_r, prefs[-1]) / self.scale # == ones x pref, size==(bs, rtg_dim); as DD does
+        target_weighted_returns = torch.multiply(max_r / self.scale, prefs[-1]) # == ones x pref, size==(bs, rtg_dim); as DD does
         if self.concat_rtg_pref != 0:
             target_r[:, :, -self.pref_dim:] = prefs[0]
             # target_weighted_returns = torch.cat((target_weighted_returns, torch.cat([prefs] * self.concat_rtg_pref, dim=1)), dim=1)
@@ -190,12 +190,13 @@ class MODiffuser(TrajectoryModel):
         conds = {}
         dim_start, dim_end = 0, 0
         
-        if a is not None:
-            dim_start = dim_end
-            dim_end += self.act_dim
-            conds.update({'a' : Inpaint(0, self.cond_M - 1, dim_start, dim_end, a)})
-        else:
-            conds.update({'a': None})
+        # if a is not None:
+        #     dim_start = dim_end
+        #     dim_end += self.act_dim
+        #     conds.update({'a' : Inpaint(0, self.cond_M - 1, dim_start, dim_end, a)})
+        # else:
+        #     conds.update({'a': None})
+        conds.update({'a': None})
             
         if s is not None:
             dim_start = dim_end

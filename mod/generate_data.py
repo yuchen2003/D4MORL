@@ -1,4 +1,4 @@
-from diffuser.models import Inpaint
+from mod.model import Inpaint
 from mod.model import MODiffuser
 import torch
 from collections import defaultdict

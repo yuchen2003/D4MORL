@@ -99,7 +99,7 @@ class DiffuserTrainer(Trainer):
         
         # or 2. weighted average
         cur_r_weight = 10
-        traj_returns = (r.sum(1) + (cur_r_weight - 1) * r[:, self.cond_M - 1, :]) / (r.shape[1] + cur_r_weight - 1) # unweighted
+        traj_returns = (r.sum(1) + (cur_r_weight - 1) * r[:, self.cond_M - 1, :]) / (r.shape[1] + cur_r_weight - 1)
         traj_weighted_returns = torch.multiply(traj_returns, p[:, 0, :])
         
         if self.concat_rtg_pref != 0:

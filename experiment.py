@@ -527,7 +527,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--env', type=str, default='MO-Hopper-v2')
     parser.add_argument('--dataset', type=str, nargs='+', default=['expert_uniform'])
-    parser.add_argument('--num_traj', type=int, default=10000)
+    parser.add_argument('--num_traj', type=int, default=50000)
     parser.add_argument('--data_mode', type=str, default='_formal')
     parser.add_argument('--ckpt', type=str, default='')
     parser.add_argument('--mode', type=str, default='normal')  # normal for standard setting, delayed for sparse

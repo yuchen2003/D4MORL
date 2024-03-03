@@ -45,9 +45,10 @@ def make_timesteps(batch_size, i, device):
     return t
 
 class MOGaussianDiffusion(nn.Module):
-    def __init__(self, model, horizon, observation_dim, action_dim, pref_dim, rtg_dim, trans_dim, hidden_dim, mod_type='bc', n_timesteps=1000, loss_type='l1', clip_denoised=False, predict_epsilon=True, action_weight=1, loss_discount=1, loss_weights=None, returns_condition=False, condition_guidance_w=0.1, ar_inv=False, train_only_inv=False):
+    def __init__(self, model, horizon, cond_M, observation_dim, action_dim, pref_dim, rtg_dim, trans_dim, hidden_dim, mod_type='bc', n_timesteps=1000, loss_type='l1', clip_denoised=False, predict_epsilon=True, action_weight=10, loss_discount=0.99, loss_weights=None, returns_condition=False, condition_guidance_w=0.1, ar_inv=False, train_only_inv=False):
         super().__init__()
         self.horizon = horizon
+        self.cond_M = cond_M
         
         self.observation_dim = observation_dim
         self.action_dim = action_dim
@@ -100,7 +101,7 @@ class MOGaussianDiffusion(nn.Module):
         # get loss coefficients and initialize objective
         loss_weights = self.get_loss_weights(
             action_weight, loss_discount, loss_weights)
-        self.loss_fn = Losses[loss_type](loss_weights, self.action_dim)
+        self.loss_fn = Losses[loss_type](loss_weights, self.action_dim, self.cond_M)
         
         self.mod_type = mod_type
         
@@ -118,6 +119,8 @@ class MOGaussianDiffusion(nn.Module):
         '''
         self.action_weight = action_weight
 
+        # FIXME should change all these
+        
         dim_weights = torch.ones(self.transition_dim, dtype=torch.float32)
 
         # set loss coefficients for dimensions of observation
@@ -132,7 +135,7 @@ class MOGaussianDiffusion(nn.Module):
         loss_weights = torch.einsum('h,t->ht', discounts, dim_weights)
 
         # manually set a0 weight
-        loss_weights[0, :self.action_dim] = action_weight
+        loss_weights[self.cond_M - 1, :self.action_dim] = action_weight
         return loss_weights
 
     def _apply_inpaint_cond(self, x, conditions):
@@ -367,9 +370,10 @@ class ARInvModel(nn.Module):
         return loss / self.action_dim
 
 class MOGaussianInvDynDiffusion(nn.Module):
-    def __init__(self, model, horizon, observation_dim, action_dim, pref_dim, rtg_dim, trans_dim, hidden_dim, mod_type='bc', n_timesteps=1000, loss_type='l1', clip_denoised=False, predict_epsilon=True, action_weight=1, loss_discount=1, loss_weights=None, returns_condition=False, condition_guidance_w=0.1, ar_inv=False, train_only_inv=False):
+    def __init__(self, model, horizon, cond_M, observation_dim, action_dim, pref_dim, rtg_dim, trans_dim, hidden_dim, mod_type='bc', n_timesteps=1000, loss_type='l1', clip_denoised=False, predict_epsilon=True, action_weight=1, loss_discount=1, loss_weights=None, returns_condition=False, condition_guidance_w=0.1, ar_inv=False, train_only_inv=False):
         super().__init__()
         self.horizon = horizon
+        self.cond_M = cond_M
         self.observation_dim = observation_dim
         self.action_dim = action_dim
         self.transition_dim = trans_dim
@@ -628,7 +632,7 @@ class MOGaussianInvDynDiffusion(nn.Module):
         info = {}
         if self.train_only_inv:
             loss = inv_loss
-            info.update({"a0_loss: loss"})
+            info.update({"a0_loss": loss})
         else:
             batch_size = len(x)
             t = torch.randint(0, self.n_timesteps, (batch_size,), device=x.device).long()

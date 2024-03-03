@@ -26,10 +26,10 @@ base = {
         # 'n_diffusion_steps': 20,
         'action_weight': 10,
         'loss_weights': None,
-        'loss_discount': 1,
+        'loss_discount': 0.99,
         'predict_epsilon': False,
         'dim_mults': (1, 2, 4, 8),
-        'dim': 48,
+        'dim': 64,
         'attention': False,
         'renderer': 'utils.MuJoCoRenderer',
 
