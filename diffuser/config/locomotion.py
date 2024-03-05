@@ -47,7 +47,7 @@ base = {
         'exp_name': watch(args_to_watch),
 
         ## training
-        'loss_type': 'l2',
+        'loss_type': 'l1',
         'n_steps_per_epoch': 10000,
         'n_train_steps': 1e6, # overridded by D4MORL config
         # 'batch_size': 32,

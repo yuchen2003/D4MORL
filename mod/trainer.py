@@ -6,8 +6,8 @@ from collections import namedtuple
 from copy import deepcopy
 from mod.model import MODiffuser
 
-Batch = namedtuple('Batch', 'trajs conds returns') # return can be reward or rtg
-aBatch = namedtuple('ActionBatch', 'trajs actions conds returns') # for invdyn
+Batch = namedtuple('Batch', 'trajs conds prefs returns') # return can be reward or rtg
+aBatch = namedtuple('ActionBatch', 'trajs actions conds prefs returns') # for invdyn
 
 class DiffuserTrainer(Trainer):
     def __init__(
@@ -98,7 +98,7 @@ class DiffuserTrainer(Trainer):
         # traj_weighted_returns = torch.multiply(traj_returns, p[:, 0, :])
         
         # or 2. weighted average
-        cur_r_weight = 10
+        cur_r_weight = 20
         traj_returns = (r.sum(1) + (cur_r_weight - 1) * r[:, self.cond_M - 1, :]) / (r.shape[1] + cur_r_weight - 1)
         traj_weighted_returns = torch.multiply(traj_returns, p[:, 0, :])
         
@@ -111,7 +111,7 @@ class DiffuserTrainer(Trainer):
 
         # Prepare training batch
         guidance_term = torch.cat([traj_weighted_returns], dim=-1) # weighted returns, rtg, pref
-        batch = self.batch_fn(s, a, r, g, t, mask, p, guidance_term)
+        batch = self.batch_fn(s, a, r, g, t, mask, p[:, 0, :], guidance_term)
 
         # Invoke diffusion trainer
         loss, infos = self.trainer.train(1, batch)
@@ -125,7 +125,7 @@ class DiffuserTrainer(Trainer):
     def _bc_get_batch(self, s, a, r, g, t, mask, p, traj_r):
         as_trajs = torch.cat([a, s], dim=-1)
         conds = self.diffuser._make_cond(a, s, None)
-        return Batch(trajs=as_trajs, conds=conds, returns=traj_r)
+        return Batch(trajs=as_trajs, conds=conds, prefs=p, returns=traj_r)
 
     def _dd_get_batch(self, s, a, r, g, t, mask, p, traj_r):
         if self.concat_on == 'r':
@@ -139,7 +139,7 @@ class DiffuserTrainer(Trainer):
             conds = self.diffuser._make_cond(None, s, None) # as that in DD
         else:
             raise ValueError
-        return aBatch(trajs=sg_trajs, actions=a, conds=conds, returns=traj_r)
+        return aBatch(trajs=sg_trajs, actions=a, conds=conds, prefs=p, returns=traj_r)
 
     def _dt_get_batch(self, s, a, r, g, t, mask, p, traj_r):
         if self.concat_on == 'r':
@@ -150,5 +150,5 @@ class DiffuserTrainer(Trainer):
             conds = self.diffuser._make_cond(a, s, g)
         else:
             raise ValueError
-        return Batch(trajs=asg_trajs, conds=conds, returns=traj_r)
+        return Batch(trajs=asg_trajs, conds=conds, prefs=p, returns=traj_r)
 

@@ -112,7 +112,7 @@ class TemporalUnet(nn.Module):
         horizon,
         transition_dim,
         cond_dim, # e.g., rtg_dim + pref_dim
-        rtg_dim,
+        pref_dim,
         dim=128,
         dim_mults=(1, 2, 4, 8),
         attention=False,
@@ -134,7 +134,7 @@ class TemporalUnet(nn.Module):
             mish = True
             act_fn = nn.Mish()
 
-        self.rtg_dim = rtg_dim
+        self.pref_dim = pref_dim
         self.returns_dim = dim
 
         self.time_mlp = nn.Sequential(
@@ -142,6 +142,14 @@ class TemporalUnet(nn.Module):
             nn.Linear(dim, dim * 4),
             act_fn,
             nn.Linear(dim * 4, dim),
+        )
+        
+        self.pref_mlp = nn.Sequential(
+            nn.Linear(self.pref_dim, dim),
+            act_fn,
+            nn.Linear(dim, 4 * dim),
+            act_fn,
+            nn.Linear(4 * dim, dim),
         )
 
         self.returns_condition = returns_condition
@@ -157,9 +165,9 @@ class TemporalUnet(nn.Module):
                         nn.Linear(dim * 4, dim),
                     ) # For conditioning on rtg|reward|pref
             self.mask_dist = Bernoulli(probs=1-self.condition_dropout)
-            embed_dim = 2 * dim # Time embed + rtg embed
+            embed_dim = 3 * dim # Time embed + pref embed + rtg embed
         else:
-            embed_dim = dim # Only time embed
+            embed_dim = 2 * dim # Time embed + pref embed
 
         self.downs = nn.ModuleList([])
         self.ups = nn.ModuleList([])
@@ -202,7 +210,7 @@ class TemporalUnet(nn.Module):
             nn.Conv1d(dim, transition_dim, 1),
         )
 
-    def forward(self, x, cond, time, returns=None, use_dropout=True, force_dropout=False):
+    def forward(self, x, cond, time, prefs, returns=None, use_dropout=True, force_dropout=False):
         '''
             x : [ batch x horizon x transition ]
             returns : [batch x horizon x pref_dim]
@@ -213,6 +221,9 @@ class TemporalUnet(nn.Module):
         x = einops.rearrange(x, 'b h t -> b t h')
 
         t = self.time_mlp(time)
+        p = self.pref_mlp(prefs)
+        
+        t = torch.cat([t, p], dim=-1)
 
         if self.returns_condition:
             assert returns is not None

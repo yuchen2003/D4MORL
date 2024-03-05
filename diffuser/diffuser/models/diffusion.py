@@ -20,9 +20,9 @@ Sample = namedtuple('Sample', 'trajectories values chains')
 
 @torch.no_grad()
 # this sample fn dont use cond (depend on the unet)
-def default_sample_fn(model, x, cond, t):
+def default_sample_fn(model, x, cond, t, prefs):
     model_mean, _, model_log_variance = model.p_mean_variance(
-        x=x, cond=cond, t=t)
+        x=x, cond=cond, t=t, prefs=prefs)
     model_std = torch.exp(0.5 * model_log_variance)
 
     # no noise when t == 0
@@ -118,8 +118,6 @@ class MOGaussianDiffusion(nn.Module):
                 { i: c } multiplies dimension i of observation loss by c
         '''
         self.action_weight = action_weight
-
-        # FIXME should change all these
         
         dim_weights = torch.ones(self.transition_dim, dtype=torch.float32)
 
@@ -136,6 +134,7 @@ class MOGaussianDiffusion(nn.Module):
 
         # manually set a0 weight
         loss_weights[self.cond_M - 1, :self.action_dim] = action_weight
+        loss_weights[:self.cond_M - 1] = 0
         return loss_weights
 
     def _apply_inpaint_cond(self, x, conditions):
@@ -178,14 +177,14 @@ class MOGaussianDiffusion(nn.Module):
             self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-    def p_mean_variance(self, x, cond, t, returns=None):
+    def p_mean_variance(self, x, cond, t, prefs, returns=None):
         if self.returns_condition:
             # epsilon could be epsilon or x0 itself
-            epsilon_cond = self.model(x, cond, t, returns, use_dropout=False)
-            epsilon_uncond = self.model(x, cond, t, returns, force_dropout=True)
+            epsilon_cond = self.model(x, cond, t, prefs, returns, use_dropout=False)
+            epsilon_uncond = self.model(x, cond, t, prefs, returns, force_dropout=True)
             epsilon = epsilon_uncond + self.condition_guidance_w * (epsilon_cond - epsilon_uncond)
         else:
-            epsilon = self.model(x, cond, t)
+            epsilon = self.model(x, cond, t, prefs)
 
         t = t.detach().to(torch.int64)
         x_recon = self.predict_start_from_noise(x, t=t, noise=epsilon)
@@ -200,16 +199,16 @@ class MOGaussianDiffusion(nn.Module):
         return model_mean, posterior_variance, posterior_log_variance
 
     @torch.no_grad()
-    def p_sample(self, x, cond, t, returns=None):
+    def p_sample(self, x, cond, t, prefs, returns=None):
         b, *_, device = *x.shape, x.device
-        model_mean, _, model_log_variance = self.p_mean_variance(x=x, cond=cond, t=t, returns=returns)
+        model_mean, _, model_log_variance = self.p_mean_variance(x=x, cond=cond, t=t, prefs=prefs, returns=returns)
         noise = 0.5*torch.randn_like(x)
         # no noise when t == 0
         nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
         return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
     
     @torch.no_grad()
-    def p_sample_loop(self, shape, cond, returns=None, verbose=True, return_chain=False, sample_fn=default_sample_fn, **sample_kwargs):
+    def p_sample_loop(self, shape, cond, prefs, returns=None, verbose=True, return_chain=False, sample_fn=default_sample_fn, **sample_kwargs):
         device = self.betas.device
 
         batch_size = shape[0]
@@ -223,7 +222,7 @@ class MOGaussianDiffusion(nn.Module):
         for i in reversed(range(0, self.n_timesteps)):
             t = make_timesteps(batch_size, i, device)
             # x, values = sample_fn(self, x, cond, t, **sample_kwargs)
-            x = self.p_sample(x, cond, t, returns)
+            x = self.p_sample(x, cond, t, prefs, returns)
             x = self._apply_inpaint_cond(x, cond)
 
             progress.update({'t': i})
@@ -239,14 +238,14 @@ class MOGaussianDiffusion(nn.Module):
         return Sample(x, values, chain)
 
     @torch.no_grad()
-    def conditional_sample(self, cond, batch_size, returns, horizon=None, **sample_kwargs):
+    def conditional_sample(self, cond, batch_size, prefs, returns, horizon=None, **sample_kwargs):
         '''
             conditions : [ (time, state), ... ]
         '''
         horizon = horizon or self.horizon
         shape = (batch_size, horizon, self.transition_dim)
 
-        return self.p_sample_loop(shape, cond, returns, **sample_kwargs)
+        return self.p_sample_loop(shape, cond, prefs, returns, **sample_kwargs)
 
     # ------------------------------------------ training ------------------------------------------#
     
@@ -262,13 +261,13 @@ class MOGaussianDiffusion(nn.Module):
 
         return sample
 
-    def p_losses(self, x_start, cond, t, returns=None):
+    def p_losses(self, x_start, cond, t, prefs, returns=None):
         noise = torch.randn_like(x_start)
 
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         x_noisy = self._apply_inpaint_cond(x_noisy, cond)
 
-        x_recon = self.model(x_noisy, cond, t, returns) # train return-cond and un-return-cond model simutaneously
+        x_recon = self.model(x_noisy, cond, t, prefs, returns) # train return-cond and un-return-cond model simutaneously
         if not self.predict_epsilon:
             x_recon = self._apply_inpaint_cond(x_recon, cond)
 
@@ -281,15 +280,15 @@ class MOGaussianDiffusion(nn.Module):
 
         return loss, info
 
-    def loss(self, x, cond, returns=None):  # x -> traj; args -> cond
+    def loss(self, x, cond, prefs, returns=None):  # x -> traj; args -> cond
         batch_size = len(x)
         t = torch.randint(0, self.n_timesteps, (batch_size,),
                           device=x.device).long()
-        return self.p_losses(x, cond, t, returns)
+        return self.p_losses(x, cond, t, prefs, returns)
 
-    def forward(self, cond, batch_size, returns, *args, **kwargs):  # not used in training
+    def forward(self, cond, batch_size, prefs, returns, *args, **kwargs):  # not used in training
         # args -> horizon, return -> Sample(<denoised traj>, <some? value>, <trajs chain>); kwargs -> verbose=True, return_chain=False, sample_fn=default_sample_fn, **sample_kwargs(-> sample_fn(**))
-        return self.conditional_sample(cond, batch_size, returns, *args, **kwargs)
+        return self.conditional_sample(cond, batch_size, prefs, returns, *args, **kwargs)
 
 class ARInvModel(nn.Module):
     def __init__(self, hidden_dim, observation_dim, action_dim, low_act=-1.0, up_act=1.0):
