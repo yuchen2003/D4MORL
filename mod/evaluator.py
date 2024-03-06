@@ -62,12 +62,13 @@ class EvaluatorMOD(Evaluator):
                 # add padding
                 actions = torch.cat([actions, torch.zeros(
                     (1, self.act_dim), device=self.device)], dim=0)
-                # rewards = torch.cat([rewards, torch.ones((1, self.rtg_dim), device=self.device)], dim=0)
+                rewards = torch.cat([rewards, torch.tensor(self.max_each_obj_step, dtype=torch.float32, device=self.device).reshape(1, -1)], dim=0)
 
                 action = model.get_action(
                     states.to(dtype=torch.float32),
                     actions.to(dtype=torch.float32),
                     target_return.to(dtype=torch.float32),
+                    rewards,
                     prefs.to(dtype=torch.float32),
                     timesteps.to(dtype=torch.long),
                     torch.tensor(self.max_each_obj_step, device=self.device, dtype=torch.float32),
@@ -77,6 +78,8 @@ class EvaluatorMOD(Evaluator):
                 action = np.multiply(action, self.act_scale)
 
                 state_np, _, done, info = self.eval_env.step(action)
+                
+                rewards[-1] = torch.tensor(info['obj'], dtype=torch.float32, device=self.device).reshape(1, -1)
                 
                 # eval: for return, don't process any data, NO clipping, NO rewriting, etc.
                 # model: for auto-reg rollout, process data

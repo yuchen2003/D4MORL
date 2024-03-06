@@ -9,7 +9,7 @@ from diffuser import utils
 
 from collections import namedtuple
 
-DESIGNED_MOD_TYPE = ['bc', 'dd', 'dt']
+DESIGNED_MOD_TYPE = ['bc', 'dd', 'dt', 'mt']
 
 Sample = namedtuple("Sample", "trajectories values chains")
 Inpaint = namedtuple("InpaintConfig", "traj_start traj_end dim_start dim_end target")
@@ -79,6 +79,9 @@ class MODiffuser(TrajectoryModel):
         elif self.mod_type == 'dt':
             self.act_fn = self._dt_get_action
             trans_dim = self.act_dim + self.state_dim + self.rtg_dim  # a, s, g
+        elif self.mod_type == 'mt': # TODO
+            self.act_fn = self._mt_get_action
+            trans_dim = self.act_dim
 
         assert infer_N + cond_M == max_length
         self.infer_N = infer_N
@@ -140,20 +143,25 @@ class MODiffuser(TrajectoryModel):
         batch_size = target_return.shape[0]
         return self.diffusion.forward(cond, batch_size, prefs, target_return, *args, **kwargs)
 
-    def get_action(self, states, actions, rtg, prefs, timesteps, max_r):
+    def get_action(self, states, actions, rtg, rewards, prefs, timesteps, max_r):
         ''' Predict a_t using s_{t-N:t} and a_{t-N:t-1}, as in DMBP '''
         rtg = rtg[-self.max_length : ]
+        max_r = torch.multiply(max_r / self.scale, prefs[-1])
+        
         # print(prefs.shape)
         if self.concat_on == 'r':
-            target_r = torch.ones(1, self.max_length, self.rtg_dim, device=states.device, dtype=torch.float32)
-            target_r[:, :, :self.pref_dim] = torch.multiply(max_r / self.scale, target_r[:, :, :self.pref_dim])
+            # target_r = torch.ones(1, self.max_length, self.rtg_dim, device=states.device, dtype=torch.float32)
+            target_r = rewards.unsqueeze(0)
+            target_r[:, :, :self.pref_dim] = torch.multiply(max_r, target_r[:, :, :self.pref_dim])
         elif self.concat_on == 'g':
             target_r = torch.zeros(1, self.max_length, self.rtg_dim, device=states.device, dtype=torch.float32)
             target_r[0, -rtg.shape[0]:, :rtg.shape[1]] = rtg
         else:
             raise ValueError
         
-        target_weighted_returns = torch.multiply(max_r / self.scale, prefs[-1]) # == ones x pref, size==(bs, rtg_dim); as DD does
+        # target_weighted_returns = torch.multiply(max_r, prefs[-1]) # == ones x pref, size==(bs, rtg_dim); as DD does
+        target_weighted_returns = max_r
+        
         if self.concat_rtg_pref != 0:
             target_r[:, :, -self.pref_dim:] = prefs[0]
             # target_weighted_returns = torch.cat((target_weighted_returns, torch.cat([prefs] * self.concat_rtg_pref, dim=1)), dim=1)
@@ -205,13 +213,13 @@ class MODiffuser(TrajectoryModel):
         else:
             conds.update({'s': None})
             
-        # if g is not None:
-        #     dim_start = dim_end
-        #     dim_end += self.rtg_dim
-        #     conds.update({'g' : Inpaint(0, self.cond_M, dim_start, dim_end, g)})
-        # else:
-        #     conds.update({'g': None})
-        conds.update({'g': None})
+        if g is not None:
+            dim_start = dim_end
+            dim_end += self.rtg_dim
+            conds.update({'g' : Inpaint(0, self.cond_M, dim_start, dim_end, g)})
+        else:
+            conds.update({'g': None})
+        # conds.update({'g': None})
 
         return conds
 
