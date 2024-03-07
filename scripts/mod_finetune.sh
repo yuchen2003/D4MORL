@@ -350,12 +350,33 @@ wait
 CUDA_VISIBLE_DEVICES=1 python experiment.py --dir experiment_runs/mod_impl2/weighted_r/4 --env MO-HalfCheetah-v2 --concat_state_pref 1 --concat_rtg_pref 1 --concat_act_pref 1 --seed 1 --dataset expert_uniform --model_type mod --mod_type dt --num_steps_per_iter 50000 --max_iters 4 --use_p_bar True --K 8 --infer_N 4 --n_diffusion_steps 16 --returns_condition True --granularity 50 &
 CUDA_VISIBLE_DEVICES=0 python experiment.py --dir experiment_runs/mod_impl2/weighted_r/0 --env MO-HalfCheetah-v2 --concat_state_pref 1 --concat_rtg_pref 1 --concat_act_pref 1 --seed 1 --dataset expert_uniform --model_type mod --mod_type dt --num_steps_per_iter 50000 --max_iters 4 --use_p_bar True --K 8 --infer_N 0 --n_diffusion_steps 16 --returns_condition True --granularity 50 &
 wait
+# *** no influence
 
 # planning
 CUDA_VISIBLE_DEVICES=1 python experiment.py --dir experiment_runs/mod_impl2/plan --env MO-HalfCheetah-v2 --concat_state_pref 0 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_uniform --model_type mod --mod_type bc --num_steps_per_iter 50000 --max_iters 20 --use_p_bar True --K 8 --infer_N 7 --n_diffusion_steps 16 --returns_condition True --granularity 50 &
 CUDA_VISIBLE_DEVICES=0 python experiment.py --dir experiment_runs/mod_impl2/plan --env MO-Hopper-v2 --concat_state_pref 0 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_uniform --model_type mod --mod_type bc --num_steps_per_iter 50000 --max_iters 20 --use_p_bar True --K 8 --infer_N 7 --n_diffusion_steps 16 --returns_condition True --granularity 50 &
-wait
-
 CUDA_VISIBLE_DEVICES=1 python experiment.py --dir experiment_runs/mod_impl2/plan --env MO-HalfCheetah-v2 --concat_state_pref 0 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_uniform --model_type mod --mod_type dt --num_steps_per_iter 50000 --max_iters 20 --use_p_bar True --K 8 --infer_N 7 --n_diffusion_steps 16 --returns_condition True --granularity 50 &
 CUDA_VISIBLE_DEVICES=0 python experiment.py --dir experiment_runs/mod_impl2/plan --env MO-Hopper-v2 --concat_state_pref 0 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_uniform --model_type mod --mod_type dt --num_steps_per_iter 50000 --max_iters 20 --use_p_bar True --K 8 --infer_N 7 --n_diffusion_steps 16 --returns_condition True --granularity 50 &
+wait
+# *** OK !
+# *** 4e5 train step is enough; mod-bc is close to mod-dt
+
+# planning custom
+CUDA_VISIBLE_DEVICES=1 python experiment.py --dir experiment_runs/mod_impl2/plan --env MO-HalfCheetah-v2 --concat_state_pref 0 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_custom --model_type mod --mod_type bc --num_steps_per_iter 50000 --max_iters 20 --use_p_bar True --K 8 --infer_N 7 --n_diffusion_steps 16 --returns_condition True --granularity 50 &
+CUDA_VISIBLE_DEVICES=0 python experiment.py --dir experiment_runs/mod_impl2/plan --env MO-Hopper-v2 --concat_state_pref 0 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_custom --model_type mod --mod_type bc --num_steps_per_iter 50000 --max_iters 20 --use_p_bar True --K 8 --infer_N 7 --n_diffusion_steps 16 --returns_condition True --granularity 50 &
+CUDA_VISIBLE_DEVICES=1 python experiment.py --dir experiment_runs/mod_impl2/plan --env MO-HalfCheetah-v2 --concat_state_pref 0 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_custom --model_type mod --mod_type dt --num_steps_per_iter 50000 --max_iters 20 --use_p_bar True --K 8 --infer_N 7 --n_diffusion_steps 16 --returns_condition True --granularity 50 &
+CUDA_VISIBLE_DEVICES=0 python experiment.py --dir experiment_runs/mod_impl2/plan --env MO-Hopper-v2 --concat_state_pref 0 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_custom --model_type mod --mod_type dt --num_steps_per_iter 50000 --max_iters 20 --use_p_bar True --K 8 --infer_N 7 --n_diffusion_steps 16 --returns_condition True --granularity 50 &
+wait
+# ***
+
+# TODO mod-dd planning
+CUDA_VISIBLE_DEVICES=1 python experiment.py --dir experiment_runs/mod_impl2/plan --env MO-HalfCheetah-v2 --concat_state_pref 0 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_uniform --model_type mod --mod_type dd --num_steps_per_iter 50000 --max_iters 20 --use_p_bar True --K 8 --infer_N 7 --n_diffusion_steps 16 --returns_condition True --granularity 50 &
+CUDA_VISIBLE_DEVICES=0 python experiment.py --dir experiment_runs/mod_impl2/plan --env MO-HalfCheetah-v2 --concat_state_pref 0 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_custom --model_type mod --mod_type dd --num_steps_per_iter 50000 --max_iters 20 --use_p_bar True --K 8 --infer_N 7 --n_diffusion_steps 16 --returns_condition True --granularity 50 &
+wait
+
+# TODO context
+CUDA_VISIBLE_DEVICES=1 python experiment.py --dir experiment_runs/mod_impl3/context --env MO-HalfCheetah-v2 --concat_state_pref 0 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_custom --model_type mod --mod_type bc --num_steps_per_iter 50000 --max_iters 20 --use_p_bar True --K 16 --infer_N 8 --n_diffusion_steps 16 --returns_condition True --granularity 50 &
+CUDA_VISIBLE_DEVICES=0 python experiment.py --dir experiment_runs/mod_impl3/context --env MO-Hopper-v2 --concat_state_pref 0 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_custom --model_type mod --mod_type bc --num_steps_per_iter 50000 --max_iters 20 --use_p_bar True --K 16 --infer_N 8 --n_diffusion_steps 16 --returns_condition True --granularity 50 &
+CUDA_VISIBLE_DEVICES=1 python experiment.py --dir experiment_runs/mod_impl3/context --env MO-HalfCheetah-v2 --concat_state_pref 0 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_custom --model_type mod --mod_type dt --num_steps_per_iter 50000 --max_iters 20 --use_p_bar True --K 16 --infer_N 8 --n_diffusion_steps 16 --returns_condition True --granularity 50 &
+CUDA_VISIBLE_DEVICES=0 python experiment.py --dir experiment_runs/mod_impl3/context --env MO-Hopper-v2 --concat_state_pref 0 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_custom --model_type mod --mod_type dt --num_steps_per_iter 50000 --max_iters 20 --use_p_bar True --K 16 --infer_N 8 --n_diffusion_steps 16 --returns_condition True --granularity 50 &
 wait

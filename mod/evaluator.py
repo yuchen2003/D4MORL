@@ -10,7 +10,7 @@ class EvaluatorMOD(Evaluator):
 
         model.eval()
         model.to(device=self.device)
-        print(f'[ eval ] target pref: {target_pref}, cur_step: {cur_step}')
+        # print(f'[ eval ] target pref: {target_pref}, cur_step: {cur_step}')
 
         with torch.no_grad():
             init_target_return = deepcopy(target_return)

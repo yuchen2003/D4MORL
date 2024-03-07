@@ -41,7 +41,7 @@ class DataGenerator:
         
         self.max_r = torch.tensor(max_r, dtype=torch.float32, device=self.device)
         
-    def _make_cond(self, pref):
+    def _make_cond(self, pref): 
         conds = {}
         traj_start, traj_end = 0, self.max_len
         dim_start, dim_end = 0, 0
@@ -49,7 +49,7 @@ class DataGenerator:
         for term, dim in zip(['a', 's', 'g'], [self.act_dim, self.state_dim, self.rtg_dim]):
             dim_end += dim
             dim_start = dim_end - self.pref_dim
-            ph = pref.repeat(1, self.max_len, 1)
+            ph = pref.repeat(1, self.max_len, 1) # FIXME: not need this
             conds.update({term: Inpaint(traj_start, traj_end, dim_start, dim_end, ph)})
             
         return conds

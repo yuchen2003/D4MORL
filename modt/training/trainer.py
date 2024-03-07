@@ -94,14 +94,16 @@ class Trainer:
         cur_step = (ep+1) * self.n_steps_per_iter
 
         set_final_return, set_unweighted_raw_return, set_weighted_raw_return, set_cum_r_original = [], [], [], []
-        for eval_fn in self.eval_fns:
-            outputs, final_returns, unweighted_raw_returns, weighted_raw_returns, cum_r_original = eval_fn(self.model, cur_step)
-            set_final_return.append(np.mean(final_returns, axis=0))
-            set_unweighted_raw_return.append(np.mean(unweighted_raw_returns, axis=0))
-            set_weighted_raw_return.append(np.mean(weighted_raw_returns, axis=0))
-            set_cum_r_original.append(np.mean(cum_r_original, axis=0))
-            for k, v in outputs.items():
-                logs[f'evaluation/{k}'] = v
+        with tqdm(self.eval_fns) as t:
+            for eval_fn in t:
+                t.set_postfix_str(f"eval: {eval_fn.target_pref}")
+                outputs, final_returns, unweighted_raw_returns, weighted_raw_returns, cum_r_original = eval_fn(self.model, cur_step)
+                set_final_return.append(np.mean(final_returns, axis=0))
+                set_unweighted_raw_return.append(np.mean(unweighted_raw_returns, axis=0))
+                set_weighted_raw_return.append(np.mean(weighted_raw_returns, axis=0))
+                set_cum_r_original.append(np.mean(cum_r_original, axis=0))
+                for k, v in outputs.items():
+                    logs[f'evaluation/{k}'] = v
 
 
         rollout_unweighted_raw_r = np.array(set_unweighted_raw_return)

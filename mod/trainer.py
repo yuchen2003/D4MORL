@@ -8,6 +8,7 @@ from mod.model import MODiffuser
 
 Batch = namedtuple('Batch', 'trajs conds prefs returns') # return can be reward or rtg
 aBatch = namedtuple('ActionBatch', 'trajs actions conds prefs returns') # for invdyn
+from mod.model import Inpaint
 
 class DiffuserTrainer(Trainer):
     def __init__(
@@ -76,6 +77,10 @@ class DiffuserTrainer(Trainer):
 
         self.trainer = trainer_config(model.diffusion)
         self.diffuser = model # MODiffuser
+        self.state_dim = self.diffuser.state_dim
+        self.act_dim = self.diffuser.act_dim
+        self.rtg_dim = self.diffuser.rtg_dim
+        self.pref_dim = self.diffuser.pref_dim
 
         self.mod_type = self.model.mod_type
         if self.mod_type == 'bc':
@@ -93,7 +98,7 @@ class DiffuserTrainer(Trainer):
         s, a, r, g, t, mask, p = self.get_batch() # r, g is divided by scale
         g = g[:, :-1]
         
-        r = torch.multiply(r, p)
+        # r = torch.multiply(r, p)
 
         # 1. all average
         # traj_returns = r.sum(1) / r.shape[1] # unweighted
@@ -101,8 +106,8 @@ class DiffuserTrainer(Trainer):
         
         # or 2. weighted average
         cur_r_weight = 10
-        traj_weighted_returns = (r.sum(1) + (cur_r_weight - 1) * r[:, self.cond_M - 1, :]) / (r.shape[1] + cur_r_weight - 1)
-        # traj_weighted_returns = torch.multiply(traj_returns, p[:, 0, :])
+        traj_returns = (r.sum(1) + (cur_r_weight - 1) * r[:, self.cond_M - 1, :]) / (r.shape[1] + cur_r_weight - 1)
+        traj_weighted_returns = torch.multiply(traj_returns, p[:, 0, :])
         
         if self.concat_rtg_pref != 0:
             g = torch.cat((g, torch.cat([p] * self.concat_rtg_pref, dim=2)), dim=2)
@@ -124,21 +129,48 @@ class DiffuserTrainer(Trainer):
 
         return loss, infos
 
+    def _make_cond(self, a=None, s=None, g=None):
+        conds = {}
+        dim_start, dim_end = 0, 0
+        
+        if a is not None:
+            dim_start = dim_end
+            dim_end += self.act_dim
+            conds.update({'a' : Inpaint(0, self.cond_M - 1, dim_start, dim_end, a)})
+        else:
+            conds.update({'a': None})
+            
+        if s is not None:
+            dim_start = dim_end
+            dim_end += self.state_dim
+            conds.update({'s' : Inpaint(0, self.cond_M - int(a is None), dim_start, dim_end, s)})
+        else:
+            conds.update({'s': None})
+            
+        if g is not None:
+            dim_start = dim_end
+            dim_end += self.rtg_dim
+            conds.update({'g' : Inpaint(0, self.cond_M - 1, dim_start, dim_end, g)})
+        else:
+            conds.update({'g': None})
+
+        return conds
+    
     def _bc_get_batch(self, s, a, r, g, t, mask, p, traj_r):
         as_trajs = torch.cat([a, s], dim=-1)
-        conds = self.diffuser._make_cond(a, s, None)
+        conds = self._make_cond(a, s, None)
         return Batch(trajs=as_trajs, conds=conds, prefs=p, returns=traj_r)
 
     def _dd_get_batch(self, s, a, r, g, t, mask, p, traj_r):
         if self.concat_on == 'r':
             sg_trajs = torch.cat([s, r], dim=-1)
-            conds = self.diffuser._make_cond(None, s, r)
+            conds = self._make_cond(None, s, r)
         elif self.concat_on == 'g':
             sg_trajs = torch.cat([s, g], dim=-1)
-            conds = self.diffuser._make_cond(None, s, g)
+            conds = self._make_cond(None, s, g)
         elif self.concat_on == 's':
             sg_trajs = s
-            conds = self.diffuser._make_cond(None, s, None) # as that in DD
+            conds = self._make_cond(None, s, None) # as that in DD
         else:
             raise ValueError
         return aBatch(trajs=sg_trajs, actions=a, conds=conds, prefs=p, returns=traj_r)
@@ -146,10 +178,10 @@ class DiffuserTrainer(Trainer):
     def _dt_get_batch(self, s, a, r, g, t, mask, p, traj_r):
         if self.concat_on == 'r':
             asg_trajs = torch.cat([a, s, r], dim=-1)
-            conds = self.diffuser._make_cond(a, s, r)
+            conds = self._make_cond(a, s, r)
         elif self.concat_on == 'g':
             asg_trajs = torch.cat([a, s, g], dim=-1)
-            conds = self.diffuser._make_cond(a, s, g)
+            conds = self._make_cond(a, s, g)
         else:
             raise ValueError
         return Batch(trajs=asg_trajs, conds=conds, prefs=p, returns=traj_r)

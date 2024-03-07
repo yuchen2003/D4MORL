@@ -186,7 +186,7 @@ class MODiffuser(TrajectoryModel):
                         dtype=torch.float32,
                         device=traj.device,
                     ),
-                    traj,  # the last one(s)
+                    traj,
                 ],
                 dim=1,
             )
@@ -202,6 +202,7 @@ class MODiffuser(TrajectoryModel):
         if a is not None:
             dim_start = dim_end
             dim_end += self.act_dim
+            a = a[:, -(self.cond_M - 1):]
             conds.update({'a' : Inpaint(0, self.cond_M - 1, dim_start, dim_end, a)})
         else:
             conds.update({'a': None})
@@ -209,6 +210,7 @@ class MODiffuser(TrajectoryModel):
         if s is not None:
             dim_start = dim_end
             dim_end += self.state_dim
+            s = s[:, -(self.cond_M - int(a is None)):]
             conds.update({'s' : Inpaint(0, self.cond_M - int(a is None), dim_start, dim_end, s)})
         else:
             conds.update({'s': None})
@@ -216,10 +218,10 @@ class MODiffuser(TrajectoryModel):
         if g is not None:
             dim_start = dim_end
             dim_end += self.rtg_dim
+            g = g[:, -self.cond_M:]
             conds.update({'g' : Inpaint(0, self.cond_M, dim_start, dim_end, g)})
         else:
             conds.update({'g': None})
-        # conds.update({'g': None})
 
         return conds
 

@@ -28,7 +28,7 @@ base = {
         'loss_weights': None,
         'loss_discount': 0.99,
         'predict_epsilon': False,
-        'dim_mults': (1, 2, 4, 8),
+        'dim_mults': (1, 4, 8),
         'dim': 64,
         'attention': False,
         'renderer': 'utils.MuJoCoRenderer',
