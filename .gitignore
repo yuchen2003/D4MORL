@@ -114,3 +114,5 @@ __pycache__
 logs/
 experiment_runs/
 *.ipynb
+trajer/*
+model-based/*

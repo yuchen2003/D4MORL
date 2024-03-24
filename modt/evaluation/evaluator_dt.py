@@ -45,7 +45,7 @@ class EvaluatorDT(Evaluator):
             pref_tensor = torch.from_numpy(pref_np).reshape(1, self.pref_dim).to(device=self.device, dtype=torch.float32)
             prefs = pref_tensor
             
-            target_return = torch.tensor(target_return, device=self.device, dtype=torch.float32).reshape(1, self.rtg_dim)
+            target_return = torch.tensor(target_return / self.max_ep_len, device=self.device, dtype=torch.float32).reshape(1, self.rtg_dim)
             timesteps = torch.tensor(0, device=self.device, dtype=torch.long).reshape(1, 1)
             
             episode_return_eval, episode_length_eval = 0, 0

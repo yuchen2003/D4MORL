@@ -80,7 +80,7 @@ class Trainer:
             self.model.train()
             for ite in tqdm(range(self.n_steps_per_iter), disable=not self.use_p_bar):
                 if is_mod:
-                    train_loss, infos = self.train_step()
+                    train_loss, infos = self.train_step(ite)
                 else:
                     train_loss = self.train_step()
                 train_losses.append(train_loss)
@@ -135,7 +135,7 @@ class Trainer:
         "num_traj": 'unspecified',
         'datapath': self.datapath,
         'eps': 0.02,
-        'is_custom': False, # not distinguish whether or not in the hole
+        'is_custom': ('custom' in self.datapath),
         }
         visualize(rollout_logs, self.logsdir, cur_step, infos=infos, draw_ood=True)
         

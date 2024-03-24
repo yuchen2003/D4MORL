@@ -46,7 +46,7 @@ class EvaluatorMOD(Evaluator):
             prefs = pref_tensor
 
             target_return = torch.tensor(
-                target_return, device=self.device, dtype=torch.float32).unsqueeze(0)
+                target_return / self.max_ep_len, device=self.device, dtype=torch.float32).unsqueeze(0)
             timesteps = torch.tensor(
                 0, device=self.device, dtype=torch.long).reshape(1, 1)
 
@@ -144,20 +144,20 @@ class EvaluatorMOD(Evaluator):
                 unweighted_raw_reward_cumulative_eval * self.scale, 3)
             total_return_scaled_back_eval = np.round(
                 np.sum(weighted_raw_reward_cumulative_eval), 3)
-            if not self.eval_only:
-                log_file_name = f'{self.logsdir}/step={cur_step}.txt'
-                with open(log_file_name, 'a') as f:
-                    f.write(
-                        f"\ntarget return: {target_ret_scaled_back} ------------> {weighted_raw_reward_cumulative_eval}\n")
-                    f.write(
-                        f"target pref: {np.round(init_target_pref, 3)} ------------> {np.round(cum_r_original / np.sum(cum_r_original), 3)}\n")
-                    f.write(
-                        f"\tunweighted raw returns: {unweighted_raw_return_cumulative_eval}\n")
-                    f.write(
-                        f"\tweighted raw return: {weighted_raw_reward_cumulative_eval}\n")
-                    f.write(
-                        f"\tweighted final return: {total_return_scaled_back_eval}\n")
-                    f.write(f"\tlength: {episode_length_eval}\n")
+            # if not self.eval_only:
+            log_file_name = f'{self.logsdir}/step={cur_step}.txt'
+            with open(log_file_name, 'a') as f:
+                f.write(
+                    f"\ntarget return: {target_ret_scaled_back} ------------> {weighted_raw_reward_cumulative_eval}\n")
+                f.write(
+                    f"target pref: {np.round(init_target_pref, 3)} ------------> {np.round(cum_r_original / np.sum(cum_r_original), 3)}\n")
+                f.write(
+                    f"\tunweighted raw returns: {unweighted_raw_return_cumulative_eval}\n")
+                f.write(
+                    f"\tweighted raw return: {weighted_raw_reward_cumulative_eval}\n")
+                f.write(
+                    f"\tweighted final return: {total_return_scaled_back_eval}\n")
+                f.write(f"\tlength: {episode_length_eval}\n")
 
             # self.decide_save_video(np.multiply(actions.detach().cpu().numpy(), self.act_scale), raw_rewards_cumulative, init_target_return, init_target_pref, seed)
             return episode_return_eval, episode_length_eval, unweighted_raw_reward_cumulative_eval, weighted_raw_reward_cumulative_eval, cum_r_original

@@ -5,6 +5,7 @@ from .hopper import HopperEnv
 from .hopper_v3 import HopperEnv as HopperEnv_v3
 from .swimmer import SwimmerEnv
 from .walker2d import Walker2dEnv
+from .humanoid import HumanoidEnv
 
 # Wrap with d4rl Offline Env Wrapper
 from d4rl.offline_env import OfflineEnv
@@ -51,4 +52,10 @@ register(
     id = 'MO-Swimmer-v2',
     entry_point = env_wrapper(SwimmerEnv),
     max_episode_steps=500,
+)
+
+register(
+    id = 'MO-Humanoid-v2',
+    entry_point = env_wrapper(HumanoidEnv),
+    max_episode_steps=1000,
 )

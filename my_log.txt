@@ -1,5 +1,0 @@
-d4rl dataset:
-['actions', 'infos/action_log_probs', 'infos/qpos', 'infos/qvel', 'next_observations', 'observations', 'rewards', 'terminals', 'timeouts']
-
-dataset_paths = [f"data/{env_name}/{env_name}_50000_{d}.pkl" for d in dataset]
-

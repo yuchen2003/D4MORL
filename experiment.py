@@ -17,8 +17,11 @@ from torch import nn
 from state_norm_params import state_norm_params # we use normalization parameter for states from the behavioral policy
 import random
 import json
-from data_generation.custom_pref import HOLES, HOLES_v2, HOLES_v3, RejectHole
+from data_generation.custom_pref import get_hole_config
 import time
+
+tens = torch.zeros(1, device='cuda')
+print(tens)
 
 isCloseToOne = lambda x: isclose(x, 1, rel_tol=1e-12)
 def pref_grid(n_obj, max_prefs=None, min_prefs=None, granularity=5):
@@ -51,6 +54,7 @@ def experiment(
     env_name = variant['env']
     dataset = variant['dataset']
     num_traj = variant['num_traj']
+    tag = variant['dataset_tag']
     device = variant['device']
     log_to_wandb = variant['log_to_wandb']
     model_type = variant['model_type'].lower()
@@ -81,15 +85,17 @@ def experiment(
     returns_condition = variant['returns_condition']
     collect = variant['collect']
     collect_num = variant['collect_num']
-    
-    tens = torch.zeros(1, device='cuda')
-    print(tens)
+    mixup_step = variant['mixup_step']
+    mixup_num = variant['mixup_num']
     
     if model_type == 'mod':
         mod_type = variant['mod_type']
         assert ((not collect) or (model_type == 'mod' and mod_type == 'dt')), "Only use MODiffuser for data augmentation."
-        infer_N = variant['infer_N'] # >= 0, the length of traj to be infered
-        cond_M = K - infer_N
+        infer_N = variant['infer_N'] # >= 0, the length of traj to be infered, or < 0 for default config
+        if infer_N < 0:
+            cond_M = - infer_N
+        else:
+            cond_M = K - infer_N
         assert cond_M >= 1 and infer_N >= 0 # when cond_M == 1, use no traj context (except for current state)
         if mod_type == 'dd':
             assert(cond_M < K)
@@ -137,6 +143,8 @@ def experiment(
     
     if model_type in ['cql']:
         from modt.training.loader import QGetBatch as GetBatch
+    elif model_type in ['mod']:
+        from modt.training.loader import AugGetBatch as GetBatch
     else:
         from modt.training.loader import GetBatch
     
@@ -160,11 +168,16 @@ def experiment(
     pref_dim = reward_size
     rtg_dim = pref_dim if mo_rtg else 1
     scale = 100
-    max_ep_len = 500 # also dataset max_ep_len, which is defined in env description
+    if 'Humanoid' in env_name:
+        # also dataset max_ep_len, which is defined in env description
+        max_ep_len = 1000
+    else:
+        max_ep_len = 500 
     if not normalize_reward:
         scale *= 10
     
     # if using multiple dataset, load all at once
+    TAG, HOLES, HOLES_v2, HOLES_v3 = get_hole_config(tag)
     generation_path = "data_generation/data_collected"
     for i, d in enumerate(dataset):
         if d.endswith('custom'):
@@ -174,13 +187,13 @@ def experiment(
                 hole = HOLES_v2
             else:
                 hole = HOLES
-            dataset[i] += f'_{hole}'
+            dataset[i] += f'_{tag}_{hole.radius}'
     dataset_paths = [f"{generation_path}/{env_name}/{env_name}_{num_traj}_new{d}.pkl" for d in dataset]
     trajectories = []
     for data_path in dataset_paths:
         with open(data_path, 'rb') as f:
             trajectories.extend(pickle.load(f))
-
+    
     states, traj_lens, returns, returns_mo, preferences = [], [], [], [], []
     min_each_obj_step = np.min(np.vstack([np.min(traj['raw_rewards'], axis=0) for traj in trajectories]), axis=0)
     max_each_obj_step = np.max(np.vstack([np.max(traj['raw_rewards'], axis=0) for traj in trajectories]), axis=0)
@@ -223,8 +236,12 @@ def experiment(
         
 
     states = np.concatenate(states, axis=0)
-    state_mean = state_norm_params[env_name]["mean"]
-    state_std = np.sqrt(state_norm_params[env_name]["var"])
+    if env_name == 'MO-Humanoid-v2':
+        state_mean = np.mean(states, axis=0)[:state_dim]
+        state_std = np.std(states, axis=0)[:state_dim] + 1e-5
+    else:
+        state_mean = state_norm_params[env_name]["mean"]
+        state_std = np.sqrt(state_norm_params[env_name]["var"])
     state_mean = np.concatenate((state_mean, np.zeros(concat_state_pref * pref_dim)))
     state_std = np.concatenate((state_std, np.ones(concat_state_pref * pref_dim)))
     state_dim += pref_dim * concat_state_pref
@@ -246,7 +263,7 @@ def experiment(
     if concat_act_pref == 0 and concat_rtg_pref == 0 and concat_state_pref == 0 and model_type == "bc":
         granularity = 1
     if env_name == 'MO-Hopper-v3':
-        granularity = 50
+        granularity = 18
     prefs = pref_grid(pref_dim, granularity=granularity)
     
     print('=' * 50)
@@ -279,7 +296,7 @@ def experiment(
         act_high = np.array(env.action_space.high),
         avg_rtg = bool(model_type == "rvs"), # RvS conditions on future avg return
         use_obj = use_obj,
-        concat_state_pref = concat_state_pref
+        concat_state_pref = concat_state_pref,
     )
 
     video_dir = variant['dir'] + f'/{model_type}_eval_videos'
@@ -290,7 +307,7 @@ def experiment(
         del trajectories
         del states
         del traj_lens
-        del preferences
+        # del preferences
         del get_batch
         get_batch = None
     
@@ -382,7 +399,7 @@ def experiment(
             act_dim=act_dim,
             pref_dim=pref_dim,
             n_layer=variant['n_layer'],
-            max_length=K, # 
+            max_length=K,
             hidden_size=variant['embed_dim'], # 512
             action_space = env.action_space,
             cons_q=cons_q,
@@ -414,6 +431,9 @@ def experiment(
             concat_on=concat_on,
             verbose=mod_verbose,
             warmup_steps=warmup_steps,
+            id_prefs=preferences,
+            mixup_step=mixup_step,
+            mixup_num=mixup_num,
         )
         if collect:
             data_generator = DataGenerator(model, max_each_obj_step, collect_num, max_ep_len)
@@ -528,6 +548,7 @@ if __name__ == '__main__':
     parser.add_argument('--env', type=str, default='MO-Hopper-v2')
     parser.add_argument('--dataset', type=str, nargs='+', default=['expert_uniform'])
     parser.add_argument('--num_traj', type=int, default=50000)
+    parser.add_argument('--dataset_tag', type=str, default='large') # large, small, fewshot (set in data_generation/custom_pref.py)
     parser.add_argument('--data_mode', type=str, default='_formal')
     parser.add_argument('--ckpt', type=str, default='')
     parser.add_argument('--mode', type=str, default='normal')  # normal for standard setting, delayed for sparse
@@ -565,13 +586,13 @@ if __name__ == '__main__':
     parser.add_argument('--eval_context_length', type=int, default=5)
     parser.add_argument('--rtg_scale', type=float, default=1)
     parser.add_argument('--seed', type=int, default=123454321)
-    parser.add_argument('--granularity', type=int, default=100) # or 324 for hopper3d
+    parser.add_argument('--granularity', type=int, default=500) # or 18 for hopper3d (324 points)
     parser.add_argument('--use_max_rtg', type=bool, default=False)
     parser.add_argument('--use_p_bar', type=bool, default=True)
     parser.add_argument('--conservative_q', type=int, default=3)
     # MODiffuser configs
     parser.add_argument('--mod_type', type=str, default='bc') # bc, dd, dt
-    parser.add_argument('--infer_N', type=int, default=0) # traj_gen = tau_{t-M+1:t} (M cond) ## tau_{t+1:t+N} (N infer); notice a_hat = a_t
+    parser.add_argument('--infer_N', type=int, default=-1) # traj_gen = tau_{t-M+1:t} (M cond) ## tau_{t+1:t+N} (N infer); notice a_hat = a_t
     parser.add_argument('--n_diffusion_steps', type=int, default=10)
     parser.add_argument('--returns_condition', type=bool, default=False) # if want to set False, just not use this option
     parser.add_argument('--v_cfg_w', type=float, default=0.1)
@@ -579,6 +600,9 @@ if __name__ == '__main__':
     parser.add_argument('--diffuser_sample_verbose', type=bool, default=False)
     parser.add_argument('--collect', type=bool, default=False)
     parser.add_argument('--collect_num', type=int, default=10000)
+    parser.add_argument('--mixup', type=bool, default=False)
+    parser.add_argument('--mixup_step', type=int, default=100000)
+    parser.add_argument('--mixup_num', type=int, default=8)
     
     args = parser.parse_args()
     
@@ -586,6 +610,7 @@ if __name__ == '__main__':
     seed_everything(seed=seed)
     
     dataset_name = '+'.join(args.dataset)
+    if 'custom' in dataset_name: dataset_name += '_' + args.dataset_tag
     
     if args.concat_state_pref + args.concat_act_pref + args.concat_rtg_pref == 0:
         typ = 'naive'
@@ -593,6 +618,8 @@ if __name__ == '__main__':
         typ = 'normal'
     if args.model_type == 'mod':
         typ += f'/{args.mod_type}'
+        
+    if args.mixup == False: args.mixup_num = 0
         
     args.run_name = f"{args.dir}/{args.model_type}/{typ}/{args.env}/{dataset_name}/{args.seed}"
     args.dir = args.run_name

@@ -93,12 +93,13 @@ class DiffuserTrainer(Trainer):
         self.infer_N = self.model.infer_N
         self.cond_M = self.model.cond_M
         self.concat_on = self.model.concat_on
+        self.mixup_step = self.diffuser.mixup_step
+        self.mixup_num = self.diffuser.mixup_num
 
-    def train_step(self):
-        s, a, r, g, t, mask, p = self.get_batch() # r, g is divided by scale
+    def train_step(self, cur_step):
+        use_mixup = (cur_step < self.mixup_step)
+        s, a, r, g, t, mask, p = self.get_batch(use_mixup, self.mixup_num) # r, g is divided by scale
         g = g[:, :-1]
-        
-        # r = torch.multiply(r, p)
 
         # 1. all average
         # traj_returns = r.sum(1) / r.shape[1] # unweighted
@@ -107,17 +108,21 @@ class DiffuserTrainer(Trainer):
         # or 2. weighted average
         cur_r_weight = 10
         traj_returns = (r.sum(1) + (cur_r_weight - 1) * r[:, self.cond_M - 1, :]) / (r.shape[1] + cur_r_weight - 1)
+        # max_r = torch.tensor(self.dataset_max_raw_r / 1000 / 500, dtype=torch.float32, device=s.device) # FIXME
+        # max_returns = max_r.repeat(len(p) - len(traj_returns), 1)
+        # traj_returns = torch.cat([traj_returns, max_returns])
+        
         traj_weighted_returns = torch.multiply(traj_returns, p[:, 0, :])
         
         if self.concat_rtg_pref != 0:
             g = torch.cat((g, torch.cat([p] * self.concat_rtg_pref, dim=2)), dim=2)
             r = torch.cat((r, torch.cat([p] * self.concat_rtg_pref, dim=2)), dim=2)
-            # traj_weighted_returns = torch.cat((traj_weighted_returns, torch.cat([p[:, 0, :]] * self.concat_rtg_pref, dim=1)), dim=1)
         if self.concat_act_pref != 0:
             a = torch.cat((a, torch.cat([p] * self.concat_act_pref, dim=2)), dim=2)
 
         # Prepare training batch
         guidance_term = torch.cat([traj_weighted_returns], dim=-1) # weighted returns, rtg, pref
+        # guidance_term = g[:, self.cond_M - 1]
         batch = self.batch_fn(s, a, r, g, t, mask, p[:, 0, :], guidance_term)
 
         # Invoke diffusion trainer
@@ -143,7 +148,7 @@ class DiffuserTrainer(Trainer):
         if s is not None:
             dim_start = dim_end
             dim_end += self.state_dim
-            conds.update({'s' : Inpaint(0, self.cond_M - int(a is None), dim_start, dim_end, s)})
+            conds.update({'s' : Inpaint(0, self.cond_M, dim_start, dim_end, s)})
         else:
             conds.update({'s': None})
             

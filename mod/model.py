@@ -3,13 +3,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-import transformers
 from modt.models.model import TrajectoryModel
 from diffuser import utils
 
 from collections import namedtuple
 
-DESIGNED_MOD_TYPE = ['bc', 'dd', 'dt', 'mt']
+DESIGNED_MOD_TYPE = ['bc', 'dd', 'dt']
 
 Sample = namedtuple("Sample", "trajectories values chains")
 Inpaint = namedtuple("InpaintConfig", "traj_start traj_end dim_start dim_end target")
@@ -45,6 +44,9 @@ class MODiffuser(TrajectoryModel):
         concat_on='r', 
         verbose=False,
         warmup_steps=10000,
+        id_prefs=None,
+        mixup_step=100000,
+        mixup_num=8,
     ):
         super().__init__(state_dim, act_dim, pref_dim, max_length=max_length)
 
@@ -58,6 +60,8 @@ class MODiffuser(TrajectoryModel):
         self.eval_context_length = eval_context_length
         self.verbose = verbose
         self.warmup_steps = warmup_steps
+        self.mixup_step = mixup_step
+        self.mixup_num = mixup_num
 
         self.state_dim = state_dim
         self.act_dim = act_dim + concat_act_pref * pref_dim   
@@ -79,19 +83,20 @@ class MODiffuser(TrajectoryModel):
         elif self.mod_type == 'dt':
             self.act_fn = self._dt_get_action
             trans_dim = self.act_dim + self.state_dim + self.rtg_dim  # a, s, g
-        elif self.mod_type == 'mt': # TODO
-            self.act_fn = self._mt_get_action
-            trans_dim = self.act_dim
 
         assert infer_N + cond_M == max_length
         self.infer_N = infer_N
         self.cond_M = cond_M
-        self.gen_H = max_length
+        self.gen_H = max_length # used for generation, can be different from that in training
         
         self.batch_size = batch_size
 
         self.args = args = diffuser_args
         self.device = args.device
+        
+        sort_idx = np.argsort(id_prefs[:, 0])
+        self.id_prefs = torch.from_numpy(id_prefs[sort_idx]).to(dtype=torch.float32, device=self.device)
+        self.pref_rec = {}
         
         model_config = utils.Config(
             args.model,
@@ -136,45 +141,123 @@ class MODiffuser(TrajectoryModel):
         self._model = model_config()
 
         self.diffusion = diffusion_config(self._model)
+        
+        self.n_diffsteps = args.n_diffusion_steps
 
-    def forward(self, cond, prefs, target_return, *args, **kwargs) -> Sample:
+    def forward(self, cond, prefs, target_return, gen_H, n_timestep_start=None, n_timestep_end=None, **kwargs) -> Sample:
         # return -> Sample(<denoised traj>, <some? value>, <trajs chain>)
         # Just for sampling
         batch_size = target_return.shape[0]
-        return self.diffusion.forward(cond, batch_size, prefs, target_return, *args, **kwargs)
+        return self.diffusion.forward(cond, batch_size, prefs, target_return, gen_H, n_timestep_start, n_timestep_end, **kwargs)
+    
+    def sample_start_from_latent(self, cond, prefs, returns, n_timestep_start=None, n_timestep_end=None, latent=None, **kwargs) -> Sample:
+        return self.diffusion.sample_start_from_latent(cond, prefs, returns, n_timestep_start, n_timestep_end, latent, **kwargs)
 
     def get_action(self, states, actions, rtg, rewards, prefs, timesteps, max_r):
-        ''' Predict a_t using s_{t-N:t} and a_{t-N:t-1}, as in DMBP '''
+        ''' Plan using s_{t-N:t} and a_{t-N:t-1} (or also r_{t-N:t-1}), return the first action in the plan '''
+        
+        return self._get_id_action(states, actions, rtg, rewards, prefs, timesteps, max_r)
+        
+        # target_id_prefs = self._get_id_pref(prefs[-1])
+        # if target_id_prefs is None:
+        #     return self._get_id_action(states, actions, rtg, rewards, prefs, timesteps, max_r)
+        # else:
+        #     return self._get_ood_action(states, actions, rtg, rewards, prefs, target_id_prefs, timesteps, max_r)
+    
+    def _preprocess(self, states, actions, rtg, rewards, prefs, timesteps, max_r):
         rtg = rtg[-self.max_length : ]
         max_r = torch.multiply(max_r / self.scale, prefs[-1])
         
-        # print(prefs.shape)
         if self.concat_on == 'r':
-            # target_r = torch.ones(1, self.max_length, self.rtg_dim, device=states.device, dtype=torch.float32)
-            target_r = rewards.unsqueeze(0)
-            target_r[:, :, :self.pref_dim] = torch.multiply(max_r, target_r[:, :, :self.pref_dim])
+            target_r = rewards
         elif self.concat_on == 'g':
-            target_r = torch.zeros(1, self.max_length, self.rtg_dim, device=states.device, dtype=torch.float32)
-            target_r[0, -rtg.shape[0]:, :rtg.shape[1]] = rtg
+            target_r = rtg
         else:
             raise ValueError
         
-        # target_weighted_returns = torch.multiply(max_r, prefs[-1]) # == ones x pref, size==(bs, rtg_dim); as DD does
-        target_weighted_returns = max_r
-        
         if self.concat_rtg_pref != 0:
-            target_r[:, :, -self.pref_dim:] = prefs[0]
-            # target_weighted_returns = torch.cat((target_weighted_returns, torch.cat([prefs] * self.concat_rtg_pref, dim=1)), dim=1)
+            target_r = torch.cat((target_r, torch.cat([prefs] * self.concat_rtg_pref, dim=1)), dim=1)
         if self.concat_act_pref != 0:
             actions = torch.cat((actions, torch.cat([prefs] * self.concat_rtg_pref, dim=1)), dim=1)
         
-        guidance_terms = torch.cat([target_weighted_returns], dim=-1).view(1, -1) # weighted returns, rtg, pref
+        guidance_terms = torch.cat([max_r], dim=-1).view(1, -1) # target weighted returns
+        # guidance_terms = rtg[[-1]]
+        
+        return target_r, guidance_terms
+    
+    def _get_ood_action(self, states, actions, rtg, rewards, prefs, target_id_prefs, timesteps, max_r):
+        # currently: mod-dt, cond_M == 1
+        states = self._pad_or_clip(states)
+        actions = self._pad_or_clip(actions)
+        
+        t1 = int(self.n_diffsteps * 0.9)
+        
+        target_r0, guidance_terms0 = self._preprocess(states, actions, rtg, rewards, target_id_prefs[0].view(1, -1), timesteps, max_r)
+        target_r0 = self._pad_or_clip(target_r0)
+        conds0 = self._make_cond(actions, states, target_r0)
+        traj0 = self.forward(conds0, target_id_prefs[0].view(1, -1), guidance_terms0, self.gen_H, n_timestep_start=0, n_timestep_end=self.n_diffsteps - t1, verbose=self.verbose).trajectories
+        
+        target_r1, guidance_terms1 = self._preprocess(states, actions, rtg, rewards, target_id_prefs[1].view(1, -1), timesteps, max_r)
+        target_r1 = self._pad_or_clip(target_r1)
+        conds1 = self._make_cond(actions, states, target_r1)
+        traj1 = self.forward(conds1, target_id_prefs[1].view(1, -1), guidance_terms1, self.gen_H, n_timestep_start=0, n_timestep_end=self.n_diffsteps - t1, verbose=self.verbose).trajectories
+        
+        # with torch.no_grad():
+        #     t = torch.tensor(t1, dtype=torch.long, device=self.device).view(1)
+        #     traj0 = self.diffusion.q_sample(traj0, t)
+        #     traj1 = self.diffusion.q_sample(traj1, t)
+        
+        coef = (prefs[-1, 0] - target_id_prefs[1][0]) / (target_id_prefs[0][0] - target_id_prefs[1][0])
+        traj_tilde = coef * traj0 + (1. - coef) * traj1
+        
+        # print(f"coef={coef}")
+        
+        # NOTE: should use conds0 == conds1, or just condition solely on current state
+        max_r = torch.multiply(max_r / self.scale, prefs[-1])
+        guidance_terms = torch.cat([max_r], dim=-1).view(1, -1) # target weighted returns
+        traj_gen = self.sample_start_from_latent(conds0, prefs[[-1]], guidance_terms, self.n_diffsteps - t1, t1, traj_tilde, verbose=self.verbose).trajectories
+        action = traj_gen[0, self.cond_M - 1, : self.act_dim]
+        
+        if self.concat_act_pref:
+            return action[ : -self.pref_dim]
+        else:
+            return action
+        
+    
+    def _get_id_action(self, states, actions, rtg, rewards, prefs, timesteps, max_r):
+        target_r, guidance_terms = self._preprocess(states, actions, rtg, rewards, prefs, timesteps, max_r)
         action = self.act_fn(states, actions, target_r, prefs[[-1]], timesteps, guidance_terms)
+        # action = torch.zeros((1, self.act_dim), dtype=torch.float32, device=self.device)
         if self.concat_act_pref:
             return action[ : -self.pref_dim]
         else:
             return action
 
+    def _get_id_pref(self, target_pref, eps=0.02):
+        n_obj = target_pref.shape[-1]
+        assert n_obj == 2, 'Currrently only support 2 objectives.'
+        
+        param = round(target_pref[0].item(), 3)
+        if param in self.pref_rec:
+            return self.pref_rec[param]
+        
+        lo = self.id_prefs[target_pref[0] >= self.id_prefs[:, 0]]
+        hi = self.id_prefs[target_pref[0] < self.id_prefs[:, 0]]
+        if len(hi) == 0 or len(lo) == 0: # extra-ood
+            target_id_prefs = None
+        else:
+            hi = hi[0]
+            lo = lo[-1]
+            min_dist = min((hi - target_pref).abs().sum(), (lo - target_pref).abs().sum())
+            if min_dist > eps: # intra-ood
+                target_id_prefs = [lo, hi]
+            else: # id
+                target_id_prefs = None
+            
+        self.pref_rec.update({param: target_id_prefs})
+        
+        return target_id_prefs
+    
     def _pad_or_clip(self, traj):
         traj_dim = traj.shape[-1]
         traj = traj.reshape(1, -1, traj_dim)
@@ -210,16 +293,16 @@ class MODiffuser(TrajectoryModel):
         if s is not None:
             dim_start = dim_end
             dim_end += self.state_dim
-            s = s[:, -(self.cond_M - int(a is None)):]
-            conds.update({'s' : Inpaint(0, self.cond_M - int(a is None), dim_start, dim_end, s)})
+            s = s[:, -(self.cond_M):]
+            conds.update({'s' : Inpaint(0, self.cond_M, dim_start, dim_end, s)})
         else:
             conds.update({'s': None})
             
         if g is not None:
             dim_start = dim_end
             dim_end += self.rtg_dim
-            g = g[:, -self.cond_M:]
-            conds.update({'g' : Inpaint(0, self.cond_M, dim_start, dim_end, g)})
+            g = g[:, -(self.cond_M - 1):]
+            conds.update({'g' : Inpaint(0, self.cond_M - 1, dim_start, dim_end, g)})
         else:
             conds.update({'g': None})
 
@@ -244,7 +327,7 @@ class MODiffuser(TrajectoryModel):
         conds = self._make_cond(None, states, target_r)
         traj_gen = self.forward(conds, pref, target_return, self.gen_H, verbose=self.verbose).trajectories
         state_traj = traj_gen[:, :, :self.state_dim]
-        s_t, s_t_1 = state_traj[[-1], -2, :], state_traj[[-1], -1, :]
+        s_t, s_t_1 = state_traj[[-1], self.cond_M - 1, :], state_traj[[-1], self.cond_M, :]
         s_comb_t = torch.cat([s_t, s_t_1], dim=-1)
         action = self.diffusion.inv_model(s_comb_t)[-1]
         return action
@@ -282,7 +365,7 @@ class MODiffuser(TrajectoryModel):
             else:
                 checkpoint = torch.load(filename, map_location=f"cuda:{device_idx}")
 
-            self.diffusion.load_state_dict(checkpoint["diffusion"])
+            self.diffusion = checkpoint["diffusion"]
             if evaluate:
                 self.diffusion.eval()
             else:

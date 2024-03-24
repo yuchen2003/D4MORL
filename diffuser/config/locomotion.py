@@ -30,6 +30,8 @@ base = {
         'predict_epsilon': False,
         'dim_mults': (1, 4, 8),
         'dim': 64,
+        # 'dim_mults': (1, 2, 4), # for Humanoid env
+        # 'dim': 256,
         'attention': False,
         'renderer': 'utils.MuJoCoRenderer',
 

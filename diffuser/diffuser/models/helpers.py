@@ -150,7 +150,6 @@ def VP_beta_schedule(timesteps, s=0.008, dtype=torch.float32, beta_min=0.1, beta
     Variance Preserving beta schedule from
     'Zhisheng Xiao, Karsten Kreis, and Arash Vahdat. Tackling the generative learning trilemma with denoising diffusion gans. In International Conference on Learning Representations, 2022.'
     """
-    # FIXME need check
     steps = timesteps + 1
     x = np.linspace(0, steps, steps)
     betas = 1 - np.exp( - beta_min / timesteps - 0.5 * (beta_max - beta_min) * (2 * x - 1) / (timesteps ** 2) )

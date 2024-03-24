@@ -1,2 +1,2 @@
-from .temporal import TemporalUnet, ValueFunction
+from .temporal import TemporalUnet, EncoderUnet, DecoderUnet, MLPnet
 from .diffusion import MOGaussianDiffusion, MOGaussianInvDynDiffusion

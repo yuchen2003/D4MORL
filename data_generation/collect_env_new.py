@@ -14,7 +14,7 @@ from a2c_ppo_acktr import algo
 import os
 import sys
 from morl.hypervolume import InnerHyperVolume
-from custom_pref import HOLES, HOLES_v2, HOLES_v3, RejectHole
+from custom_pref import get_hole_config, RejectHole
 
 def compute_hypervolume(ep_objs_batch):
     n = len(ep_objs_batch[0])
@@ -33,6 +33,7 @@ parser.add_argument('--env_name', type=str, default='MO-Hopper-v2')
 parser.add_argument('--collect_type', type=str, default="amateur")
 # narrow, wide, uniform, custom
 parser.add_argument('--preference_type', type=str, default="custom")
+parser.add_argument('--ood_type', type=str, default='large')
 parser.add_argument('--num_traj', type=int, default=10000)
 parser.add_argument('--data_path', type=str, default="data_collected")
 parser.add_argument('--p_bar', type=bool, default=False)
@@ -94,11 +95,13 @@ env_names_and_infos = {
     }
 }
 
+TAG, HOLES, HOLES_v2, HOLES_v3 = get_hole_config(args.ood_type)
 
 def collect_helper(args, all_datas):
     data_path = f"{args.data_path}/{args.env_name}"
     if not os.path.exists(data_path):
         os.makedirs(data_path)
+        
     if args.preference_type == 'custom':
         if args.env_name == 'MO-Hopper-v3':
             hole = HOLES_v3
@@ -106,7 +109,10 @@ def collect_helper(args, all_datas):
             hole = HOLES_v2
         else:
             hole = HOLES
-        args.preference_type += f'_{hole}'
+        
+    if (TAG is not None) and (args.preference_type == 'custom'):
+        args.preference_type += f'_{TAG}_{hole.radius}'
+        
     filename = f"{data_path}/{args.env_name}_{args.num_traj}_new{args.collect_type}_{args.preference_type}.pkl"
     with open(filename, "wb") as f:
         pickle.dump(all_datas, f)
@@ -230,6 +236,8 @@ def eval_collect(args, samples, n_obj):
         # make holes on uniform dist
         if args.env_name == 'MO-Hopper-v3':
             reject_holes = RejectHole(*HOLES_v3)
+        elif args.env_name == 'MO-Hopper-v2':
+            reject_holes = RejectHole(*HOLES_v2)
         else:
             reject_holes = RejectHole(*HOLES)
         reject_sampler = RejectSampling(
@@ -366,7 +374,7 @@ def eval_sample_hv(args, samples, eval_per_sample):
 
 
 if __name__ == "__main__":
-
+    print('Collecting:', args.__dict__)
     env_name = args.env_name
     env_info = env_names_and_infos[env_name]
     base_env = gym.make(env_name)
