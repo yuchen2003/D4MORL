@@ -69,29 +69,4 @@ base = {
 
 
 #------------------------ overrides ------------------------#
-
-
-hopper_medium_expert_v2 = {
-    'plan': {
-        'scale': 0.0001,
-        't_stopgrad': 4,
-    },
-}
-
-
-halfcheetah_medium_replay_v2 = halfcheetah_medium_v2 = halfcheetah_medium_expert_v2 = {
-    'diffusion': {
-        'horizon': 4,
-        'dim_mults': (1, 4, 8),
-        'attention': True,
-    },
-    'values': {
-        'horizon': 4,
-        'dim_mults': (1, 4, 8),
-    },
-    'plan': {
-        'horizon': 4,
-        'scale': 0.001,
-        't_stopgrad': 4,
-    },
-}
+### please refer to the parameter list for default parameters for every env

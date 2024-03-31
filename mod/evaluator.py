@@ -10,7 +10,6 @@ class EvaluatorMOD(Evaluator):
 
         model.eval()
         model.to(device=self.device)
-        # print(f'[ eval ] target pref: {target_pref}, cur_step: {cur_step}')
 
         with torch.no_grad():
             init_target_return = deepcopy(target_return)
@@ -37,9 +36,7 @@ class EvaluatorMOD(Evaluator):
                 (0, self.act_dim), device=self.device, dtype=torch.float32)
             rewards = torch.zeros(
                 (0, self.rtg_dim), device=self.device, dtype=torch.float32)
-            # prefs = torch.zeros((0, self.pref_dim), device=self.device, dtype=torch.float32)
 
-            # prefs_to_go = torch.from_numpy(target_pref).to(device=self.device, dtype=torch.float32).reshape(1, self.pref_dim)
             pref_np = np.array(target_pref)
             pref_tensor = torch.from_numpy(pref_np).reshape(
                 1, self.pref_dim).to(device=self.device, dtype=torch.float32)
@@ -92,7 +89,6 @@ class EvaluatorMOD(Evaluator):
                     unweighted_raw_reward_eval = info['obj'] / self.scale
                     unweighted_raw_reward_model = info['obj'] / self.scale
 
-                # rewards[-1] = torch.tensor(unweighted_raw_reward_eval, device=self.device, dtype=torch.float32)
                 cum_r_original += info['obj']
 
                 final_reward_eval = np.dot(

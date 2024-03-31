@@ -15,9 +15,6 @@ def cycle(dl):
             yield data
 
 class EMA():
-    '''
-        empirical moving average
-    '''
     def __init__(self, beta):
         super().__init__()
         self.beta = beta
@@ -119,19 +116,19 @@ class Trainer(object):
             if self.step % self.update_ema_every == 0:
                 self.step_ema()
 
-            if self.step % self.save_freq == 0:
-                label = self.step // self.label_freq * self.label_freq
-                self.save(label)
+            # if self.step % self.save_freq == 0:
+            #     label = self.step // self.label_freq * self.label_freq
+            #     self.save(label)
 
-            if self.step % self.log_freq == 0:
-                infos_str = ' | '.join([f'{key}: {val:8.10f}' for key, val in infos.items()])
-                print(f'{self.step}: loss: {loss:8.10f} | {infos_str} | t: {timer():8.10f}', flush=True)
+            # if self.step % self.log_freq == 0:
+            #     infos_str = ' | '.join([f'{key}: {val:8.10f}' for key, val in infos.items()])
+            #     print(f'{self.step}: loss: {loss:8.10f} | {infos_str} | t: {timer():8.10f}', flush=True)
 
             # if self.step == 0 and self.sample_freq:
-            #     self.render_reference(self.n_reference)
+            #     self.render_reference(self.n_reference) # NOT IMPLEMENTED
 
             # if self.sample_freq and self.step % self.sample_freq == 0:
-            #     self.render_samples()
+            #     self.render_samples() # NOT IMPLEMENTED
 
             self.step += 1
             

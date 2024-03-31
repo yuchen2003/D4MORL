@@ -1,8 +1,6 @@
 import numpy as np
 import torch
 import random
-from mod.trajer import TrajerIWAE
-from mod.world_model import SRModel
 
 class GetBatch:
     def __init__(
@@ -246,6 +244,7 @@ class AugGetBatch:
         self.use_obj = use_obj
         self.gamma = 1.0
         self.concat_state_pref = concat_state_pref
+        print('[ loader.py ] Using Mixup Getbatch.')
 
     def discount_cumsum(self, x):
         discount_cumsum = np.zeros_like(x)
@@ -399,7 +398,8 @@ class AugGetBatch:
         # Aug through direct mixup
         if use_mixup:
             # lamda = np.random.beta(1, 1, 1)[0]
-            lamda = np.random.uniform(-0.5, 1.5, 1)[0]
+            alpha0 = 0.5 # NOTE can also be modified
+            lamda = np.random.uniform(-alpha0, 1 + alpha0, 1)[0]
             idx = np.random.randint(0, len(s), 2 * mixup_num)
             idx1, idx2 = idx[:mixup_num], idx[mixup_num:]
             
@@ -414,6 +414,12 @@ class AugGetBatch:
             raw_r = torch.cat([raw_r, raw_r_tilde], dim=0)
             rtg = torch.cat([rtg, rtg_tilde], dim=0)
             pref = torch.cat([pref, pref_tilde], dim=0)
+            
+            # for testing mixup on MODT
+            timesteps_tilde = timesteps[idx1]
+            mask_tilde = mask[idx1]
+            timesteps = torch.cat([timesteps, timesteps_tilde], dim=0)
+            mask = torch.cat([mask, mask_tilde], dim=0)
             
         return s, a, raw_r, rtg, timesteps, mask, pref
 

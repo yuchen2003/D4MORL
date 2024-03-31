@@ -11,8 +11,7 @@ from modt.utils import (
 )
 from copy import deepcopy
 import pickle
-from data_generation.custom_pref import get_hole_config, RejectHole
-# TAG, HOLES, HOLES_v2, HOLES_v3 = None, None, None, None
+from data_generation.custom_pref import RejectHole, HOLES, HOLES_v2, HOLES_v3
 
 def visualize(rollout_logs, logsdir, cur_step, draw_behavior=False, infos={}, draw_ood=False):
     n_obj = rollout_logs["n_obj"]
@@ -49,7 +48,7 @@ def visualize(rollout_logs, logsdir, cur_step, draw_behavior=False, infos={}, dr
         for i, t_pref in enumerate(target_prefs):
             is_ood = (t_pref[0] < dataset_min_prefs[0]) or (t_pref[0] > dataset_max_prefs[0]) or (t_pref in rejecthole)
             if is_ood: # ood
-                if infos['is_custom'] == True and t_pref in rejecthole:
+                if infos['is_custom'] == True and (t_pref in rejecthole):
                     if pref_edge_colors[i] == 'r':
                         pref_edge_colors[i] = 'm' # intra-ood, dominated
                     else:
@@ -119,14 +118,13 @@ def visualize(rollout_logs, logsdir, cur_step, draw_behavior=False, infos={}, dr
         axes[cur_ax].legend(loc="lower right")
         cur_ax += 1
 
-    # if not only_hv_sp:
     rollout_ratio = rollout_original_raw_r / np.sum(
         rollout_original_raw_r, axis=1, keepdims=True
     )
     axes[cur_ax].scatter(
         target_prefs[:, 0],
         rollout_ratio[:, 0],
-        label="MODT",
+        label="pref",
         facecolors=face_colors,
         edgecolors=pref_edge_colors,
     )
@@ -157,7 +155,7 @@ def visualize(rollout_logs, logsdir, cur_step, draw_behavior=False, infos={}, dr
     axes[cur_ax].scatter(
         target_prefs[:, 1],
         rollout_ratio[:, 1],
-        label="MODT",
+        label="pref",
         facecolors=face_colors,
         edgecolors=pref_edge_colors,
     )
@@ -191,7 +189,7 @@ def visualize(rollout_logs, logsdir, cur_step, draw_behavior=False, infos={}, dr
         axes[cur_ax].scatter(
             target_prefs[:, 2],
             rollout_ratio[:, 2],
-            label="MODT",
+            label="pref",
             facecolors=face_colors,
             edgecolors=pref_edge_colors,
         )
@@ -228,7 +226,7 @@ def visualize(rollout_logs, logsdir, cur_step, draw_behavior=False, infos={}, dr
             rollout_weighted_raw_r[:, 0],
             facecolors=face_colors,
             edgecolors=return_edge_colors,
-            label="MODT", # TODO fix these details
+            label="return",
         )
         axes[cur_ax].set_xlim([-5, np.max(target_returns[:, 0]) * 1.05])
         axes[cur_ax].set_ylim([-5, np.max(rollout_weighted_raw_r[:, 0]) * 1.05])
@@ -259,7 +257,7 @@ def visualize(rollout_logs, logsdir, cur_step, draw_behavior=False, infos={}, dr
             rollout_weighted_raw_r[:, 1],
             facecolors=face_colors,
             edgecolors=return_edge_colors,
-            label="MODT",
+            label="return",
         )
         axes[cur_ax].set_xlim([-5, np.max(target_returns[:, 1]) * 1.05])
         axes[cur_ax].set_ylim([-5, np.max(rollout_weighted_raw_r[:, 1]) * 1.05])
@@ -292,7 +290,7 @@ def visualize(rollout_logs, logsdir, cur_step, draw_behavior=False, infos={}, dr
                 rollout_weighted_raw_r[:, 2],
                 facecolors=face_colors,
                 edgecolors=return_edge_colors,
-                label="MODT",
+                label="return",
             )
             axes[cur_ax].set_xlim([-5, np.max(target_returns[:, 2]) * 1.05])
             axes[cur_ax].set_ylim([-5, np.max(rollout_weighted_raw_r[:, 2]) * 1.05])
@@ -325,7 +323,7 @@ def visualize(rollout_logs, logsdir, cur_step, draw_behavior=False, infos={}, dr
             rollout_final_r,
             facecolors=face_colors,
             edgecolors=return_edge_colors,
-            label="MODT",
+            label="return",
         )
         axes[cur_ax].set_xlim([-5, np.max(target_returns) * 1.05])
         axes[cur_ax].set_ylim([-5, np.max(rollout_final_r) * 1.05])
@@ -359,7 +357,7 @@ def visualize(rollout_logs, logsdir, cur_step, draw_behavior=False, infos={}, dr
         rollout_scalar_r,
         facecolors=face_colors,
         edgecolors=return_edge_colors,
-        label="MODT",
+        label="scalarised",
     )
     axes[cur_ax].set_xlim([np.min(target_prefs[:, 0]) * 0.95, np.max(target_prefs[:, 0]) * 1.05])
     axes[cur_ax].set_ylim([-5, np.max(rollout_scalar_r) * 1.05])
@@ -396,7 +394,7 @@ def cal_behavior_from_data(
 ):
     assert num_traj >= num_plot
     generation_path = f"data_generation/{data_path}"
-    is_custom = False # note this only support one dataset (not multiple custom or not custom mixed)
+    is_custom = False # NOTE currently this only support one dataset (not multiple custom or not custom mixed)
     for i, d in enumerate(datasets):
         if d.endswith('custom'):
             if env_name == 'MO-Hopper-v3':
@@ -434,7 +432,7 @@ def cal_behavior_from_data(
         returns_mo.append(traj["raw_rewards"].sum(axis=0))
         preferences.append(traj["preference"][0, :])
 
-    # padding a few (~34/50000) state trajs with 0 to be as long as others.
+    # padding a few state trajs with 0 to be as long as others.
     max_len = np.max([len(s) for s in states])
     for i, s in enumerate(states):
         if len(s) < max_len:
@@ -466,15 +464,6 @@ def cal_behavior_from_data(
     rlogs["dataset_max_raw_r"] = max_raw_r
     rlogs["dataset_min_final_r"] = min_final_r
     rlogs["dataset_max_final_r"] = max_final_r
-    
-    # lrModels = [Lasso() for _ in range(pref_dim)]
-    # target_returns = []
-    # for obj, lrModel in enumerate(lrModels):
-    #     lrModel.fit(preferences.reshape((-1, pref_dim)), returns_mo[:, obj])
-    #     target_return = lrModel.predict(preferences.reshape((-1, pref_dim)))
-    #     target_returns.append(target_return)
-        
-    # target_returns = np.array(target_returns).transpose()
 
     rollout_unweighted_raw_r = rollout_original_raw_r = returns_mo
     rollout_weighted_raw_r = np.multiply(rollout_unweighted_raw_r, preferences)
@@ -486,7 +475,7 @@ def cal_behavior_from_data(
 
     infos = {
         "env": env_name,
-        "dataset": datasets[0],  # currently use only one dataset
+        "dataset": datasets[0],  # FIXME currently use only one dataset
         "num_traj": num_traj,
         "is_custom": is_custom,
     }
@@ -562,16 +551,15 @@ if __name__ == "__main__":
     
     ### plot behavior pf
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env_name', type=str, default='MO-HalfCheetah-v2')
+    parser.add_argument('--env_name', type=str, default='MO-Hopper-v3')
     parser.add_argument('--collect_type', type=str, default="expert")
     parser.add_argument('--preference_type', type=str, default="custom") # narrow, wide, uniform, custom
-    parser.add_argument('--custom_type', type=str, default='fewshot') # large, small, fewshot
-    parser.add_argument('--num_traj', type=int, default=500)
-    parser.add_argument('--num_plot', type=int, default=500)
+    parser.add_argument('--custom_type', type=str, default='large') # large, small, fewshot
+    parser.add_argument('--num_traj', type=int, default=50000)
+    parser.add_argument('--num_plot', type=int, default=100)
     parser.add_argument('--data_path', type=str, default="data_collected")
     parser.add_argument('--p_bar', type=bool, default=True)
     args = parser.parse_args()
-    TAG, HOLES, HOLES_v2, HOLES_v3 = get_hole_config(args.custom_type)
     dataset = f"{args.collect_type}_{args.preference_type}"
     if args.preference_type == 'custom':
         if args.env_name == 'MO-Hopper-v3':

@@ -68,8 +68,6 @@ class Trainer:
         elif isinstance(self.model, MODiffuser):
             is_mod = True
             
-        
-        
         # 1. Training
         train_losses = []
         logs = dict()

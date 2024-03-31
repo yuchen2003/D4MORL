@@ -63,9 +63,9 @@ done
 
 exit
 
-CUDA_VISIBLE_DEVICES=1 python experiment.py --dir experiment_runs/all2 --env MO-Hopper-v3 --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_custom --model_type bc --num_steps_per_iter 100000 --max_iters 2 &
-CUDA_VISIBLE_DEVICES=1 python experiment.py --dir experiment_runs/all2 --env MO-Hopper-v3 --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_custom --model_type rvs --num_steps_per_iter 100000 --max_iters 2 &
-CUDA_VISIBLE_DEVICES=0 python experiment.py --dir experiment_runs/all2 --env MO-Hopper-v3 --concat_state_pref 1 --concat_rtg_pref 1 --concat_act_pref 1 --seed 1 --dataset expert_custom --model_type dt --num_steps_per_iter 200000 --max_iters 2 &
-wait
+# CUDA_VISIBLE_DEVICES=1 python experiment.py --dir experiment_runs/all2 --env MO-Hopper-v3 --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_custom --model_type bc --num_steps_per_iter 100000 --max_iters 2 &
+# CUDA_VISIBLE_DEVICES=1 python experiment.py --dir experiment_runs/all2 --env MO-Hopper-v3 --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_custom --model_type rvs --num_steps_per_iter 100000 --max_iters 2 &
+# CUDA_VISIBLE_DEVICES=0 python experiment.py --dir experiment_runs/all2 --env MO-Hopper-v3 --concat_state_pref 1 --concat_rtg_pref 1 --concat_act_pref 1 --seed 1 --dataset expert_custom --model_type dt --num_steps_per_iter 200000 --max_iters 2 &
+# wait
 
-CUDA_VISIBLE_DEVICES=1 python experiment.py --dir experiment_runs/all --env MO-Humanoid-v2 --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_uniform --num_traj 5000 --model_type rvs --num_steps_per_iter 100000 --max_iters 2 --embed_dim 1024
+# CUDA_VISIBLE_DEVICES=1 python experiment.py --dir experiment_runs/all --env MO-Humanoid-v2 --concat_state_pref 1 --concat_rtg_pref 0 --concat_act_pref 0 --seed 1 --dataset expert_uniform --num_traj 5000 --model_type rvs --num_steps_per_iter 100000 --max_iters 2 --embed_dim 1024

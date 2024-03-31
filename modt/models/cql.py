@@ -109,7 +109,7 @@ class QNetwork(
 
         self.apply(weights_init_)
 
-    def forward(self, states, actions):  # TODO may modify the input here
+    def forward(self, states, actions):
         if len(actions.shape) == 2:
             actions = actions.unsqueeze(1)
 

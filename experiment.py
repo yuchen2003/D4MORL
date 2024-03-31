@@ -17,7 +17,7 @@ from torch import nn
 from state_norm_params import state_norm_params # we use normalization parameter for states from the behavioral policy
 import random
 import json
-from data_generation.custom_pref import get_hole_config
+from data_generation.custom_pref import TAG, HOLES, HOLES_v2, HOLES_v3
 import time
 
 tens = torch.zeros(1, device='cuda')
@@ -54,7 +54,6 @@ def experiment(
     env_name = variant['env']
     dataset = variant['dataset']
     num_traj = variant['num_traj']
-    tag = variant['dataset_tag']
     device = variant['device']
     log_to_wandb = variant['log_to_wandb']
     model_type = variant['model_type'].lower()
@@ -125,7 +124,7 @@ def experiment(
         from mod.trainer import DiffuserTrainer as Trainer
         from mod.evaluator import EvaluatorMOD as Evaluator
         from mod.model import MODiffuser as Model
-        from mod.generate_data import DataGenerator
+        from trajer.generate_data import DataGenerator
         from diffuser import utils
         class Parser(utils.Parser):
             config: str = "config.locomotion"
@@ -177,7 +176,6 @@ def experiment(
         scale *= 10
     
     # if using multiple dataset, load all at once
-    TAG, HOLES, HOLES_v2, HOLES_v3 = get_hole_config(tag)
     generation_path = "data_generation/data_collected"
     for i, d in enumerate(dataset):
         if d.endswith('custom'):
@@ -187,7 +185,7 @@ def experiment(
                 hole = HOLES_v2
             else:
                 hole = HOLES
-            dataset[i] += f'_{tag}_{hole.radius}'
+            dataset[i] += f'_{TAG}_{hole.radius}'
     dataset_paths = [f"{generation_path}/{env_name}/{env_name}_{num_traj}_new{d}.pkl" for d in dataset]
     trajectories = []
     for data_path in dataset_paths:
@@ -246,7 +244,7 @@ def experiment(
     state_std = np.concatenate((state_std, np.ones(concat_state_pref * pref_dim)))
     state_dim += pref_dim * concat_state_pref
     
-    ### NOTE: regular linear model with l2-norm gives very large |coef_|, so use lasso instead (I guess this is because pref.sum(1) == 1, but linear regression dosen't recognize this, and must make a huge effort to fit it via very large coefficients)
+    ### NOTE: regular linear model with l2-norm gives very large |coef_| (overfitted), so use lasso model instead
     # lrModels = [LinearRegression() for _ in range(pref_dim)]
     # for obj, lrModel in enumerate(lrModels):
     #     lrModel.fit(preferences.reshape((-1, pref_dim)), returns_mo[:, obj])
@@ -263,7 +261,7 @@ def experiment(
     if concat_act_pref == 0 and concat_rtg_pref == 0 and concat_state_pref == 0 and model_type == "bc":
         granularity = 1
     if env_name == 'MO-Hopper-v3':
-        granularity = 18
+        granularity = 18 # NOTE as default in D4MORL
     prefs = pref_grid(pref_dim, granularity=granularity)
     
     print('=' * 50)
@@ -548,7 +546,6 @@ if __name__ == '__main__':
     parser.add_argument('--env', type=str, default='MO-Hopper-v2')
     parser.add_argument('--dataset', type=str, nargs='+', default=['expert_uniform'])
     parser.add_argument('--num_traj', type=int, default=50000)
-    parser.add_argument('--dataset_tag', type=str, default='large') # large, small, fewshot (set in data_generation/custom_pref.py)
     parser.add_argument('--data_mode', type=str, default='_formal')
     parser.add_argument('--ckpt', type=str, default='')
     parser.add_argument('--mode', type=str, default='normal')  # normal for standard setting, delayed for sparse
@@ -579,7 +576,7 @@ if __name__ == '__main__':
     parser.add_argument('--concat_act_pref', type=int, default=0)   #   |
     parser.add_argument('--normalize_reward', type=bool, default=False)
     parser.add_argument('--mo_rtg', type=bool, default=True)
-    parser.add_argument('--eval_only', type=bool, default=False)
+    parser.add_argument('--eval_only', type=bool, default=False) # may not suitable for continuing training
     parser.add_argument('--return_loss', type=bool, default=False)
     parser.add_argument('--pref_loss', type=bool, default=False)
     parser.add_argument('--optimizer', type=str, default="adam") # adam, lamb
@@ -602,7 +599,7 @@ if __name__ == '__main__':
     parser.add_argument('--collect_num', type=int, default=10000)
     parser.add_argument('--mixup', type=bool, default=False)
     parser.add_argument('--mixup_step', type=int, default=100000)
-    parser.add_argument('--mixup_num', type=int, default=8)
+    parser.add_argument('--mixup_num', type=int, default=6)
     
     args = parser.parse_args()
     
@@ -610,7 +607,7 @@ if __name__ == '__main__':
     seed_everything(seed=seed)
     
     dataset_name = '+'.join(args.dataset)
-    if 'custom' in dataset_name: dataset_name += '_' + args.dataset_tag
+    if 'custom' in dataset_name: dataset_name += '_' + TAG
     
     if args.concat_state_pref + args.concat_act_pref + args.concat_rtg_pref == 0:
         typ = 'naive'

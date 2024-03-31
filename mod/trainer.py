@@ -98,19 +98,12 @@ class DiffuserTrainer(Trainer):
 
     def train_step(self, cur_step):
         use_mixup = (cur_step < self.mixup_step)
-        s, a, r, g, t, mask, p = self.get_batch(use_mixup, self.mixup_num) # r, g is divided by scale
+        s, a, r, g, t, mask, p = self.get_batch(use_mixup, self.mixup_num) # r, g are already divided by scale
         g = g[:, :-1]
-
-        # 1. all average
-        # traj_returns = r.sum(1) / r.shape[1] # unweighted
-        # traj_weighted_returns = torch.multiply(traj_returns, p[:, 0, :])
         
-        # or 2. weighted average
+        # weighted average
         cur_r_weight = 10
         traj_returns = (r.sum(1) + (cur_r_weight - 1) * r[:, self.cond_M - 1, :]) / (r.shape[1] + cur_r_weight - 1)
-        # max_r = torch.tensor(self.dataset_max_raw_r / 1000 / 500, dtype=torch.float32, device=s.device) # FIXME
-        # max_returns = max_r.repeat(len(p) - len(traj_returns), 1)
-        # traj_returns = torch.cat([traj_returns, max_returns])
         
         traj_weighted_returns = torch.multiply(traj_returns, p[:, 0, :])
         
@@ -122,7 +115,6 @@ class DiffuserTrainer(Trainer):
 
         # Prepare training batch
         guidance_term = torch.cat([traj_weighted_returns], dim=-1) # weighted returns, rtg, pref
-        # guidance_term = g[:, self.cond_M - 1]
         batch = self.batch_fn(s, a, r, g, t, mask, p[:, 0, :], guidance_term)
 
         # Invoke diffusion trainer

@@ -14,7 +14,7 @@ from a2c_ppo_acktr import algo
 import os
 import sys
 from morl.hypervolume import InnerHyperVolume
-from custom_pref import get_hole_config, RejectHole
+from custom_pref import RejectHole, TAG, HOLES, HOLES_v2, HOLES_v3
 
 def compute_hypervolume(ep_objs_batch):
     n = len(ep_objs_batch[0])
@@ -94,8 +94,6 @@ env_names_and_infos = {
         "obj_num": 3,
     }
 }
-
-TAG, HOLES, HOLES_v2, HOLES_v3 = get_hole_config(args.ood_type)
 
 def collect_helper(args, all_datas):
     data_path = f"{args.data_path}/{args.env_name}"

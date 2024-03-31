@@ -8,18 +8,14 @@ import pdb
 import diffuser.utils as utils
 from .helpers import (
     cosine_beta_schedule,
-    VP_beta_schedule,
     extract,
     apply_conditioning,
     Losses,
 )
 
-
 Sample = namedtuple('Sample', 'trajectories values chains')
 
-
 @torch.no_grad()
-# this sample fn dont use cond (depend on the unet)
 def default_sample_fn(model, x, cond, t, prefs):
     model_mean, _, model_log_variance = model.p_mean_variance(
         x=x, cond=cond, t=t, prefs=prefs)
@@ -208,22 +204,17 @@ class MOGaussianDiffusion(nn.Module):
         return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
     
     @torch.no_grad()
-    def p_sample_loop(self, shape, cond, prefs, returns=None, n_timestep_start=None, n_timestep_end=None, latent=None, verbose=True, return_chain=False, sample_fn=default_sample_fn, **sample_kwargs):
+    def p_sample_loop(self, shape, cond, prefs, returns=None, verbose=True, return_chain=False, sample_fn=default_sample_fn, **sample_kwargs):
         device = self.betas.device
-        if n_timestep_start is None: n_timestep_start = 0
-        if n_timestep_end is None: n_timestep_end = self.n_timesteps
 
         batch_size = shape[0]
-        if latent is None:
-            x = 0.5 * torch.randn(shape, device=device)
-        else:
-            x = latent
+        x = 0.5 * torch.randn(shape, device=device)
         x = self._apply_inpaint_cond(x, cond)
 
         chain = [x] if return_chain else None
 
-        progress = utils.Progress(n_timestep_end - n_timestep_start) if verbose else utils.Silent()
-        for i in range(n_timestep_end - 1, n_timestep_start - 1, -1):
+        progress = utils.Progress(self.n_timesteps) if verbose else utils.Silent()
+        for i in reversed(range(0, self.n_timesteps)):
             t = make_timesteps(batch_size, i, device)
             x = self.p_sample(x, cond, t, prefs, returns)
             x = self._apply_inpaint_cond(x, cond)
@@ -241,22 +232,18 @@ class MOGaussianDiffusion(nn.Module):
         return Sample(x, values, chain)
 
     @torch.no_grad()
-    def conditional_sample(self, cond, batch_size, prefs, returns, horizon=None, n_timestep_start=None, n_timestep_end=None, **sample_kwargs):
+    def conditional_sample(self, cond, batch_size, prefs, returns, horizon=None, **sample_kwargs):
         '''
             conditions : [ (time, state), ... ]
         '''
         horizon = horizon or self.horizon
         shape = (batch_size, horizon, self.transition_dim)
 
-        return self.p_sample_loop(shape, cond, prefs, returns, n_timestep_start, n_timestep_end, **sample_kwargs)
+        return self.p_sample_loop(shape, cond, prefs, returns, **sample_kwargs)
     
-    def forward(self, cond, batch_size, prefs, returns, horizon=None, n_timestep_start=None, n_timestep_end=None, **kwargs):  # not used in training
+    def forward(self, cond, batch_size, prefs, returns, horizon=None, **kwargs):  # not used in training
         # args -> horizon, return -> Sample(<denoised traj>, <some? value>, <trajs chain>); kwargs -> verbose=True, return_chain=False, sample_fn=default_sample_fn, **sample_kwargs(-> sample_fn(**))
-        return self.conditional_sample(cond, batch_size, prefs, returns, horizon, n_timestep_start, n_timestep_end, **kwargs)
-    
-    def sample_start_from_latent(self, cond, prefs, returns, n_timestep_start=None, n_timestep_end=None, latent=None, **kwargs):
-        shape = latent.shape
-        return self.p_sample_loop(shape, cond, prefs, returns, n_timestep_start, n_timestep_end, latent, **kwargs)
+        return self.conditional_sample(cond, batch_size, prefs, returns, horizon, **kwargs)
 
     # ------------------------------------------ training ------------------------------------------#
     
@@ -278,7 +265,7 @@ class MOGaussianDiffusion(nn.Module):
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         x_noisy = self._apply_inpaint_cond(x_noisy, cond)
 
-        x_recon = self.model(x_noisy, cond, t, prefs, returns) # train return-cond and un-return-cond model simutaneously
+        x_recon = self.model(x_noisy, cond, t, prefs, returns)
         if not self.predict_epsilon:
             x_recon = self._apply_inpaint_cond(x_recon, cond)
 
@@ -640,6 +627,6 @@ class MOGaussianInvDynDiffusion(nn.Module):
             
         return loss, info
 
-    def forward(self, cond, batch_size, prefs, returns, horizon=None, n_timestep_start=None, n_timestep_end=None, **kwargs):  # not used in training
+    def forward(self, cond, batch_size, prefs, returns, horizon=None, **kwargs):  # not used in training
         # args -> horizon, return -> Sample(<denoised traj>, <some? value>, <trajs chain>); kwargs -> verbose=True, return_chain=False, sample_fn=default_sample_fn, **sample_kwargs(-> sample_fn(**))
         return self.conditional_sample(cond, batch_size, prefs, returns, horizon, **kwargs)

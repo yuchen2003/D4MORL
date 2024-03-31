@@ -144,27 +144,14 @@ class MODiffuser(TrajectoryModel):
         
         self.n_diffsteps = args.n_diffusion_steps
 
-    def forward(self, cond, prefs, target_return, gen_H, n_timestep_start=None, n_timestep_end=None, **kwargs) -> Sample:
+    def forward(self, cond, prefs, target_return, gen_H, **kwargs) -> Sample:
         # return -> Sample(<denoised traj>, <some? value>, <trajs chain>)
         # Just for sampling
         batch_size = target_return.shape[0]
-        return self.diffusion.forward(cond, batch_size, prefs, target_return, gen_H, n_timestep_start, n_timestep_end, **kwargs)
-    
-    def sample_start_from_latent(self, cond, prefs, returns, n_timestep_start=None, n_timestep_end=None, latent=None, **kwargs) -> Sample:
-        return self.diffusion.sample_start_from_latent(cond, prefs, returns, n_timestep_start, n_timestep_end, latent, **kwargs)
-
+        return self.diffusion.forward(cond, batch_size, prefs, target_return, gen_H, **kwargs)
+          
     def get_action(self, states, actions, rtg, rewards, prefs, timesteps, max_r):
         ''' Plan using s_{t-N:t} and a_{t-N:t-1} (or also r_{t-N:t-1}), return the first action in the plan '''
-        
-        return self._get_id_action(states, actions, rtg, rewards, prefs, timesteps, max_r)
-        
-        # target_id_prefs = self._get_id_pref(prefs[-1])
-        # if target_id_prefs is None:
-        #     return self._get_id_action(states, actions, rtg, rewards, prefs, timesteps, max_r)
-        # else:
-        #     return self._get_ood_action(states, actions, rtg, rewards, prefs, target_id_prefs, timesteps, max_r)
-    
-    def _preprocess(self, states, actions, rtg, rewards, prefs, timesteps, max_r):
         rtg = rtg[-self.max_length : ]
         max_r = torch.multiply(max_r / self.scale, prefs[-1])
         
@@ -181,82 +168,12 @@ class MODiffuser(TrajectoryModel):
             actions = torch.cat((actions, torch.cat([prefs] * self.concat_rtg_pref, dim=1)), dim=1)
         
         guidance_terms = torch.cat([max_r], dim=-1).view(1, -1) # target weighted returns
-        # guidance_terms = rtg[[-1]]
         
-        return target_r, guidance_terms
-    
-    def _get_ood_action(self, states, actions, rtg, rewards, prefs, target_id_prefs, timesteps, max_r):
-        # currently: mod-dt, cond_M == 1
-        states = self._pad_or_clip(states)
-        actions = self._pad_or_clip(actions)
-        
-        t1 = int(self.n_diffsteps * 0.9)
-        
-        target_r0, guidance_terms0 = self._preprocess(states, actions, rtg, rewards, target_id_prefs[0].view(1, -1), timesteps, max_r)
-        target_r0 = self._pad_or_clip(target_r0)
-        conds0 = self._make_cond(actions, states, target_r0)
-        traj0 = self.forward(conds0, target_id_prefs[0].view(1, -1), guidance_terms0, self.gen_H, n_timestep_start=0, n_timestep_end=self.n_diffsteps - t1, verbose=self.verbose).trajectories
-        
-        target_r1, guidance_terms1 = self._preprocess(states, actions, rtg, rewards, target_id_prefs[1].view(1, -1), timesteps, max_r)
-        target_r1 = self._pad_or_clip(target_r1)
-        conds1 = self._make_cond(actions, states, target_r1)
-        traj1 = self.forward(conds1, target_id_prefs[1].view(1, -1), guidance_terms1, self.gen_H, n_timestep_start=0, n_timestep_end=self.n_diffsteps - t1, verbose=self.verbose).trajectories
-        
-        # with torch.no_grad():
-        #     t = torch.tensor(t1, dtype=torch.long, device=self.device).view(1)
-        #     traj0 = self.diffusion.q_sample(traj0, t)
-        #     traj1 = self.diffusion.q_sample(traj1, t)
-        
-        coef = (prefs[-1, 0] - target_id_prefs[1][0]) / (target_id_prefs[0][0] - target_id_prefs[1][0])
-        traj_tilde = coef * traj0 + (1. - coef) * traj1
-        
-        # print(f"coef={coef}")
-        
-        # NOTE: should use conds0 == conds1, or just condition solely on current state
-        max_r = torch.multiply(max_r / self.scale, prefs[-1])
-        guidance_terms = torch.cat([max_r], dim=-1).view(1, -1) # target weighted returns
-        traj_gen = self.sample_start_from_latent(conds0, prefs[[-1]], guidance_terms, self.n_diffsteps - t1, t1, traj_tilde, verbose=self.verbose).trajectories
-        action = traj_gen[0, self.cond_M - 1, : self.act_dim]
-        
-        if self.concat_act_pref:
-            return action[ : -self.pref_dim]
-        else:
-            return action
-        
-    
-    def _get_id_action(self, states, actions, rtg, rewards, prefs, timesteps, max_r):
-        target_r, guidance_terms = self._preprocess(states, actions, rtg, rewards, prefs, timesteps, max_r)
         action = self.act_fn(states, actions, target_r, prefs[[-1]], timesteps, guidance_terms)
-        # action = torch.zeros((1, self.act_dim), dtype=torch.float32, device=self.device)
         if self.concat_act_pref:
             return action[ : -self.pref_dim]
         else:
             return action
-
-    def _get_id_pref(self, target_pref, eps=0.02):
-        n_obj = target_pref.shape[-1]
-        assert n_obj == 2, 'Currrently only support 2 objectives.'
-        
-        param = round(target_pref[0].item(), 3)
-        if param in self.pref_rec:
-            return self.pref_rec[param]
-        
-        lo = self.id_prefs[target_pref[0] >= self.id_prefs[:, 0]]
-        hi = self.id_prefs[target_pref[0] < self.id_prefs[:, 0]]
-        if len(hi) == 0 or len(lo) == 0: # extra-ood
-            target_id_prefs = None
-        else:
-            hi = hi[0]
-            lo = lo[-1]
-            min_dist = min((hi - target_pref).abs().sum(), (lo - target_pref).abs().sum())
-            if min_dist > eps: # intra-ood
-                target_id_prefs = [lo, hi]
-            else: # id
-                target_id_prefs = None
-            
-        self.pref_rec.update({param: target_id_prefs})
-        
-        return target_id_prefs
     
     def _pad_or_clip(self, traj):
         traj_dim = traj.shape[-1]
