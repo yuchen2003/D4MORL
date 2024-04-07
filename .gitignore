@@ -113,6 +113,6 @@ __pycache__
 *.gif
 logs/
 experiment_runs/
-*.ipynb
+
 trajer/*
 model-based/*
