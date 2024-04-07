@@ -47,6 +47,7 @@ class MODiffuser(TrajectoryModel):
         id_prefs=None,
         mixup_step=100000,
         mixup_num=8,
+        loading=False,
     ):
         super().__init__(state_dim, act_dim, pref_dim, max_length=max_length)
 
@@ -94,53 +95,56 @@ class MODiffuser(TrajectoryModel):
         self.args = args = diffuser_args
         self.device = args.device
         
-        sort_idx = np.argsort(id_prefs[:, 0])
-        self.id_prefs = torch.from_numpy(id_prefs[sort_idx]).to(dtype=torch.float32, device=self.device)
-        self.pref_rec = {}
+        # sort_idx = np.argsort(id_prefs[:, 0])
+        # self.id_prefs = torch.from_numpy(id_prefs[sort_idx]).to(dtype=torch.float32, device=self.device) # FIXME
+        # self.pref_rec = {}
         
-        model_config = utils.Config(
-            args.model,
-            savepath=(args.savepath, "model_config"),
-            horizon=max_length,
-            transition_dim=trans_dim,
-            dim=args.dim,
-            cond_dim=self.pref_dim, # weighted returns, rtg, pref(and dont use concat_rtg_pref)
-            pref_dim=self.pref_dim,
-            dim_mults=args.dim_mults,
-            attention=args.attention,
-            device=args.device,
-            returns_condition=returns_condition,
-        )  # Unet
+        if not loading:
+            model_config = utils.Config(
+                args.model,
+                savepath=(args.savepath, "model_config"),
+                horizon=max_length,
+                transition_dim=trans_dim,
+                dim=args.dim,
+                cond_dim=self.pref_dim, # weighted returns, rtg, pref(and dont use concat_rtg_pref)
+                pref_dim=self.pref_dim,
+                dim_mults=args.dim_mults,
+                attention=args.attention,
+                device=args.device,
+                returns_condition=returns_condition,
+            )  # Unet
 
-        diffusion_config = utils.Config(
-            args.diffusion,
-            savepath=(args.savepath, "diffusion_config"),
-            horizon=args.horizon,
-            cond_M = self.cond_M,
-            observation_dim=self.state_dim,
-            action_dim=self.act_dim,
-            pref_dim=self.pref_dim,
-            rtg_dim=self.rtg_dim,
-            trans_dim=trans_dim,
-            hidden_dim=hidden_size,
-            mod_type=mod_type,
-            n_timesteps=args.n_diffusion_steps,
-            loss_type=args.loss_type,
-            clip_denoised=args.clip_denoised,
-            predict_epsilon=args.predict_epsilon,
-            # loss weighting
-            action_weight=args.action_weight,
-            loss_weights=args.loss_weights,
-            loss_discount=args.loss_discount,
-            returns_condition=returns_condition,
-            condition_guidance_w=condition_guidance_w,
-            ar_inv=self.ar_inv,
-            device=args.device,
-        )
+            diffusion_config = utils.Config(
+                args.diffusion,
+                savepath=(args.savepath, "diffusion_config"),
+                horizon=args.horizon,
+                cond_M = self.cond_M,
+                observation_dim=self.state_dim,
+                action_dim=self.act_dim,
+                pref_dim=self.pref_dim,
+                rtg_dim=self.rtg_dim,
+                trans_dim=trans_dim,
+                hidden_dim=hidden_size,
+                mod_type=mod_type,
+                n_timesteps=args.n_diffusion_steps,
+                loss_type=args.loss_type,
+                clip_denoised=args.clip_denoised,
+                predict_epsilon=args.predict_epsilon,
+                # loss weighting
+                action_weight=args.action_weight,
+                loss_weights=args.loss_weights,
+                loss_discount=args.loss_discount,
+                returns_condition=returns_condition,
+                condition_guidance_w=condition_guidance_w,
+                ar_inv=self.ar_inv,
+                device=args.device,
+            )
 
-        self._model = model_config()
+            self._model = model_config()
 
-        self.diffusion = diffusion_config(self._model)
+            self.diffusion = diffusion_config(self._model)
+        else:
+            self.diffusion = None
         
         self.n_diffsteps = args.n_diffusion_steps
 

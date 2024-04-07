@@ -109,8 +109,8 @@ if __name__ == '__main__':
 
     print('start', args.env, args.dataset, args.model_type, args.mod_type, args.dir, args.mixup_step)
     if args.env == 'MO-Ant-v2':
-        sleep(5)
+        sleep(1)
     else:
-        sleep(2)
+        sleep(1)
     print('end', args.env, args.dataset, args.model_type, args.mod_type, args.dir, args.mixup_step)
     # experiment(variant=vars(args))

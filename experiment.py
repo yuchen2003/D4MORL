@@ -262,6 +262,7 @@ def experiment(
         granularity = 1
     if env_name == 'MO-Hopper-v3':
         granularity = 18 # NOTE as default in D4MORL
+        max_iters = 200000 # FIXME temporal
     prefs = pref_grid(pref_dim, granularity=granularity)
     
     print('=' * 50)
@@ -607,6 +608,7 @@ if __name__ == '__main__':
     seed_everything(seed=seed)
     
     dataset_name = '+'.join(args.dataset)
+    if 'amateur' in dataset_name: exit(-1)
     if 'custom' in dataset_name: dataset_name += '_' + TAG
     
     if args.concat_state_pref + args.concat_act_pref + args.concat_rtg_pref == 0:

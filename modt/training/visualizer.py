@@ -44,11 +44,11 @@ def visualize(rollout_logs, logsdir, cur_step, draw_behavior=False, infos={}, dr
     face_colors = ["none" for i in range(rollout_unweighted_raw_r.shape[0])]
     
     pref_edge_colors = deepcopy(edge_colors)
-    if draw_ood:
+    if draw_ood and (infos['is_custom'] == True):
         for i, t_pref in enumerate(target_prefs):
             is_ood = (t_pref[0] < dataset_min_prefs[0]) or (t_pref[0] > dataset_max_prefs[0]) or (t_pref in rejecthole)
             if is_ood: # ood
-                if infos['is_custom'] == True and (t_pref in rejecthole):
+                if t_pref in rejecthole:
                     if pref_edge_colors[i] == 'r':
                         pref_edge_colors[i] = 'm' # intra-ood, dominated
                     else:
